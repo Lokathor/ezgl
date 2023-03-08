@@ -1,0 +1,16 @@
+[package]
+name = "ezgl"
+description = "Easy times with GL."
+repository = "https://github.com/Lokathor/ezgl"
+version = "0.1.0"
+edition = "2021"
+
+publish = false
+
+[dev-dependencies]
+beryllium = "0.10.0"
+
+[dependencies]
+gl_constants = "0.1.1"
+gl_struct_loader = "0.1.1"
+gl_types = "0.1.0"
