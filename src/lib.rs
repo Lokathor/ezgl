@@ -4,29 +4,15 @@
 #![allow(clippy::result_unit_err)]
 #![warn(clippy::missing_inline_in_public_items)]
 
-use core::{ptr::null, slice::from_raw_parts as slice_from_raw_parts};
-use std::sync::{LockResult, PoisonError};
-
+use core::{
+  num::NonZeroU32,
+  ops::{Deref, DerefMut},
+  ptr::null,
+  slice::from_raw_parts as slice_from_raw_parts,
+};
 use gl_constants::*;
 use gl_struct_loader::*;
 use gl_types::*;
-
-#[inline]
-pub fn set_stderr_debug_message_callback() -> Result<(), ()> {
-  let gl = GL.read().unwrap_or_else(PoisonError::into_inner);
-  if gl.has_loaded().DebugMessageCallback() {
-    Ok(unsafe {
-      gl.DebugMessageCallback(Some(stderr_debug_message_callback), null())
-    })
-  } else if gl.has_loaded().DebugMessageCallbackKHR() {
-    // GLES uses an alternate name but the extension operates the same.
-    Ok(unsafe {
-      gl.DebugMessageCallbackKHR(Some(stderr_debug_message_callback), null())
-    })
-  } else {
-    Err(())
-  }
-}
 
 unsafe extern "system" fn stderr_debug_message_callback(
   source: GLenum, ty: GLenum, id: GLuint, severity: GLenum, length: GLsizei,
@@ -64,4 +50,321 @@ unsafe extern "system" fn stderr_debug_message_callback(
   };
   let message = String::from_utf8_lossy(message_bytes);
   eprintln!("{source}>{ty}>{id}>{severity}>{message}");
+}
+
+#[repr(transparent)]
+pub struct EzGl(GlFns);
+impl EzGl {
+  #[inline]
+  pub fn new_boxed() -> Box<Self> {
+    unsafe { core::mem::transmute(GlFns::new_boxed()) }
+  }
+}
+impl Deref for EzGl {
+  type Target = GlFns;
+  #[inline]
+  #[must_use]
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+impl DerefMut for EzGl {
+  #[inline]
+  #[must_use]
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    &mut self.0
+  }
+}
+impl EzGl {
+  #[inline]
+  pub fn set_stderr_debug_message_callback(&self) -> Result<(), ()> {
+    if self.has_loaded().DebugMessageCallback() {
+      Ok(unsafe {
+        self.DebugMessageCallback(Some(stderr_debug_message_callback), null())
+      })
+    } else if self.has_loaded().DebugMessageCallbackKHR() {
+      // GLES uses an alternate name but the extension operates the same.
+      Ok(unsafe {
+        self
+          .DebugMessageCallbackKHR(Some(stderr_debug_message_callback), null())
+      })
+    } else {
+      Err(())
+    }
+  }
+  #[inline]
+  pub fn gen_vertex_array(&self) -> Result<VertexArrayObject, ()> {
+    let mut obj = 0;
+    unsafe { self.GenVertexArrays(1, &mut obj) };
+    NonZeroU32::new(obj).ok_or(()).map(VertexArrayObject)
+  }
+  #[inline]
+  pub fn bind_vertex_array(&self, vao: &VertexArrayObject) {
+    unsafe { self.BindVertexArray(vao.0.get()) };
+  }
+  #[inline]
+  pub fn clear_vertex_array_binding(&self) {
+    unsafe { self.BindVertexArray(0) };
+  }
+  #[inline]
+  pub fn delete_vertex_array(&self, vao: VertexArrayObject) {
+    unsafe { self.DeleteVertexArrays(1, &vao.0.get()) };
+  }
+  #[inline]
+  pub fn gen_buffer(&self) -> Result<BufferObject, ()> {
+    let mut obj = 0;
+    unsafe { self.GenBuffers(1, &mut obj) };
+    NonZeroU32::new(obj).ok_or(()).map(BufferObject)
+  }
+  #[inline]
+  pub fn bind_buffer(&self, target: BufferTarget, buffer: &BufferObject) {
+    unsafe { self.BindBuffer(target as GLenum, buffer.0.get()) };
+  }
+  /// Allocate new storage for the buffer bound to `target` and copy this data
+  /// into it.
+  ///
+  /// Khronos: [glBufferData](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBufferData.xhtml)
+  #[inline]
+  pub fn alloc_buffer_data(
+    &self, target: BufferTarget, data: &[u8], usage: BufferUsageHint,
+  ) {
+    unsafe {
+      self.BufferData(
+        target as GLenum,
+        data.len().try_into().unwrap(),
+        data.as_ptr().cast::<c_void>(),
+        usage as GLenum,
+      )
+    }
+  }
+  #[inline]
+  pub fn create_shader(
+    &self, shader_type: ShaderType,
+  ) -> Result<ShaderObject, ()> {
+    NonZeroU32::new(unsafe { self.CreateShader(shader_type as GLenum) })
+      .ok_or(())
+      .map(ShaderObject)
+  }
+  #[inline]
+  pub fn set_shader_source(&self, shader: &ShaderObject, src: &str) {
+    let s: *const GLchar = src.as_ptr().cast();
+    let len: GLint = src.len().try_into().unwrap();
+    unsafe { self.ShaderSource(shader.0.get(), 1, &s, &len) }
+  }
+  #[inline]
+  pub fn compile_shader(&self, shader: &ShaderObject) {
+    unsafe { self.CompileShader(shader.0.get()) }
+  }
+  #[inline]
+  pub fn get_shader_compile_success(&self, shader: &ShaderObject) -> bool {
+    let mut success = 0;
+    unsafe { self.GetShaderiv(shader.0.get(), GL_COMPILE_STATUS, &mut success) }
+    success != 0
+  }
+  #[inline]
+  pub fn get_shader_info_log(&self, shader: &ShaderObject) -> Box<str> {
+    let mut len = 0;
+    unsafe { self.GetShaderiv(shader.0.get(), GL_INFO_LOG_LENGTH, &mut len) }
+    if len == 0 {
+      String::new().into_boxed_str()
+    } else {
+      let mut v: Vec<u8> = Vec::with_capacity(len.try_into().unwrap());
+      let mut bytes_written = 0;
+      unsafe {
+        self.GetShaderInfoLog(
+          shader.0.get(),
+          v.capacity().try_into().unwrap(),
+          &mut bytes_written,
+          v.as_mut_ptr().cast::<GLchar>(),
+        );
+        v.set_len(bytes_written.try_into().unwrap());
+      }
+      String::from_utf8_lossy(&v).into_owned().into_boxed_str()
+    }
+  }
+  #[inline]
+  pub fn create_program(&self) -> Result<ProgramObject, ()> {
+    NonZeroU32::new(unsafe { self.CreateProgram() })
+      .ok_or(())
+      .map(ProgramObject)
+  }
+  #[inline]
+  pub fn attach_shader(&self, program: &ProgramObject, shader: &ShaderObject) {
+    unsafe { self.AttachShader(program.0.get(), shader.0.get()) }
+  }
+  #[inline]
+  pub fn link_program(&self, program: &ProgramObject) {
+    unsafe { self.LinkProgram(program.0.get()) }
+  }
+  #[inline]
+  pub fn get_program_link_success(&self, program: &ProgramObject) -> bool {
+    let mut success = 0;
+    unsafe { self.GetProgramiv(program.0.get(), GL_LINK_STATUS, &mut success) }
+    success != 0
+  }
+  #[inline]
+  pub fn get_program_info_log(&self, program: &ProgramObject) -> Box<str> {
+    let mut len = 0;
+    unsafe { self.GetProgramiv(program.0.get(), GL_INFO_LOG_LENGTH, &mut len) }
+    if len == 0 {
+      String::new().into_boxed_str()
+    } else {
+      let mut v: Vec<u8> = Vec::with_capacity(len.try_into().unwrap());
+      let mut bytes_written = 0;
+      unsafe {
+        self.GetProgramInfoLog(
+          program.0.get(),
+          v.capacity().try_into().unwrap(),
+          &mut bytes_written,
+          v.as_mut_ptr().cast::<GLchar>(),
+        );
+        v.set_len(bytes_written.try_into().unwrap());
+      }
+      String::from_utf8_lossy(&v).into_owned().into_boxed_str()
+    }
+  }
+  #[inline]
+  pub fn use_program(&self, program: &ProgramObject) {
+    unsafe { self.UseProgram(program.0.get()) }
+  }
+  #[inline]
+  pub fn delete_shader(&self, shader: ShaderObject) {
+    unsafe { self.DeleteShader(shader.0.get()) }
+  }
+  #[inline]
+  pub fn delete_program(&self, program: ProgramObject) {
+    unsafe { self.DeleteProgram(program.0.get()) }
+  }
+  #[inline]
+  pub fn enable_vertex_attrib_array(&self, index: GLuint) {
+    unsafe { self.EnableVertexAttribArray(index) }
+  }
+  #[inline]
+  pub fn disable_vertex_attrib_array(&self, index: GLuint) {
+    unsafe { self.DisableVertexAttribArray(index) }
+  }
+}
+
+impl EzGl {
+  /// Declares attribute info for attributes that will be float vecs within the
+  /// shader.
+  ///
+  /// The `BufferTy` generic should be the array type of the data *in the
+  /// buffer* for this attribute. The data within the shader will be an equal
+  /// length vector of floats. The GPU will transform the data on load as
+  /// necessary.
+  ///
+  /// * `index`: The attribute pointer index to change
+  /// * `stride`: The size of an entire vertex (all attributes combined).
+  /// * `offset`: The offset of this attribute within the vertex.
+  #[inline]
+  pub fn vertex_attrib_f32_pointer<BufferTy: VertexAttribPointerTy>(
+    &self, index: GLuint, stride: usize, offset: usize,
+  ) {
+    unsafe {
+      self.VertexAttribPointer(
+        index,
+        BufferTy::SIZE,
+        BufferTy::TY,
+        BufferTy::NORMALIZED,
+        stride.try_into().unwrap(),
+        offset as *const c_void,
+      )
+    }
+  }
+  /// ## Safety
+  /// * The attrib pointers must have been properly configured
+  /// * The arguments to this function must not cause the buffer data to be read
+  ///   out of bounds.
+  #[inline]
+  pub unsafe fn draw_arrays(&self, mode: GLenum, first: GLint, count: GLsizei) {
+    self.DrawArrays(mode, first, count)
+  }
+  #[inline]
+  pub fn set_clear_color(&self, red: f32, green: f32, blue: f32, alpha: f32) {
+    unsafe { self.ClearColor(red, green, blue, alpha) }
+  }
+  /// Clears one or more buffers.
+  ///
+  /// Bits can be from the following list:
+  /// * `GL_COLOR_BUFFER_BIT`
+  /// * `GL_DEPTH_BUFFER_BIT`
+  /// * `GL_STENCIL_BUFFER_BIT`
+  #[inline]
+  pub fn clear(&self, mask: GLbitfield) {
+    unsafe { self.Clear(mask) }
+  }
+}
+
+/// ## Safety
+/// * You are not allowed to implement this trait.
+pub unsafe trait VertexAttribPointerTy {
+  const SIZE: GLint;
+  const TY: GLenum;
+  const NORMALIZED: GLboolean;
+}
+unsafe impl VertexAttribPointerTy for [f32; 3] {
+  const SIZE: GLint = 3;
+  const NORMALIZED: GLboolean = GLboolean::FALSE;
+  const TY: GLenum = GL_FLOAT;
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct VertexArrayObject(NonZeroU32);
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct BufferObject(NonZeroU32);
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct ShaderObject(NonZeroU32);
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct ProgramObject(NonZeroU32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum BufferTarget {
+  ArrayBuffer = GL_ARRAY_BUFFER,
+  AtomicCounterBuffer = GL_ATOMIC_COUNTER_BUFFER,
+  CopyReadBuffer = GL_COPY_READ_BUFFER,
+  CopyWriteBuffer = GL_COPY_WRITE_BUFFER,
+  DispatchIndirectBuffer = GL_DISPATCH_INDIRECT_BUFFER,
+  DrawIndirectBuffer = GL_DRAW_INDIRECT_BUFFER,
+  ElementArrayBuffer = GL_ELEMENT_ARRAY_BUFFER,
+  PixelPackBuffer = GL_PIXEL_PACK_BUFFER,
+  PixelUnpackBuffer = GL_PIXEL_UNPACK_BUFFER,
+  QueryBuffer = GL_QUERY_BUFFER,
+  ShaderStorageBuffer = GL_SHADER_STORAGE_BUFFER,
+  TextureBuffer = GL_TEXTURE_BUFFER,
+  TransformFeedbackBuffer = GL_TRANSFORM_FEEDBACK_BUFFER,
+  UniformBuffer = GL_UNIFORM_BUFFER,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum BufferUsageHint {
+  StreamDraw = GL_STREAM_DRAW,
+  StreamRead = GL_STREAM_READ,
+  StreamCopy = GL_STREAM_COPY,
+  StaticDraw = GL_STATIC_DRAW,
+  StaticRead = GL_STATIC_READ,
+  StaticCopy = GL_STATIC_COPY,
+  DynamicDraw = GL_DYNAMIC_DRAW,
+  DynamicRead = GL_DYNAMIC_READ,
+  DynamicCopy = GL_DYNAMIC_COPY,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ShaderType {
+  ComputeShader = GL_COMPUTE_SHADER,
+  VertexShader = GL_VERTEX_SHADER,
+  TessControlShader = GL_TESS_CONTROL_SHADER,
+  TessEvaluationShader = GL_TESS_EVALUATION_SHADER,
+  GeometryShader = GL_GEOMETRY_SHADER,
+  FragmentShader = GL_FRAGMENT_SHADER,
 }

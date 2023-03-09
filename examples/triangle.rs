@@ -1,11 +1,28 @@
+use core::mem::size_of;
+
 use beryllium::{
   events::Event,
   init::InitFlags,
-  video::{CreateWinArgs, GlContextFlags, GlProfile},
+  video::{CreateWinArgs, GlContextFlags, GlProfile, GlSwapInterval},
   Sdl,
 };
-use ezgl::set_stderr_debug_message_callback;
-use gl_struct_loader::GL;
+use bytemuck::cast_slice;
+use ezgl::{BufferTarget::*, BufferUsageHint::*, EzGl, ShaderType::*};
+use gl_constants::{GL_COLOR_BUFFER_BIT, GL_TRIANGLES};
+
+const VERTEX_SRC: &str = "#version 310 es
+  precision mediump float;
+  layout(location = 0) in vec3 pos;
+  void main() {
+    gl_Position = vec4(pos.x, pos.y, pos.z, 1.0);
+  }";
+
+const FRAGMENT_SRC: &str = "#version 310 es
+  precision mediump float;
+  out vec4 frag_color;
+  void main() {
+    frag_color = vec4(1.0, 0.0, 0.0, 1.0);
+  }";
 
 fn main() {
   // Initializes SDL2
@@ -16,15 +33,15 @@ fn main() {
     sdl.set_gl_context_major_version(4).unwrap();
     sdl.set_gl_context_minor_version(1).unwrap();
   } else {
-    // anywhere else we'll run as GLES-3.1, which desktops with GL-4.5 can
-    // provide, and this lets the app be Raspberry Pi friendly.
+    // anywhere else we'll run as GLES-3.1, which a desktop's GL-4.5 can
+    // provide, but which is also available on Raspberry Pi.
     sdl.set_gl_profile(GlProfile::ES).unwrap();
     sdl.set_gl_context_major_version(3).unwrap();
     sdl.set_gl_context_minor_version(1).unwrap();
   }
   // optimistically assume that we can use multisampling.
   sdl.set_gl_multisample_buffers(1).unwrap();
-  sdl.set_gl_multisample_count(4).unwrap();
+  sdl.set_gl_multisample_count(8).unwrap();
   let mut flags = GlContextFlags::default();
   if cfg!(target_os = "macos") {
     flags |= GlContextFlags::FORWARD_COMPATIBLE;
@@ -41,9 +58,14 @@ fn main() {
       ..Default::default()
     })
     .unwrap();
-  unsafe { GL.write().unwrap().load(|name| win.get_proc_address(name)) }
+  win.set_swap_interval(GlSwapInterval::AdaptiveVsync).ok();
+  let gl = {
+    let mut temp = EzGl::new_boxed();
+    unsafe { temp.load(|name| win.get_proc_address(name)) }
+    temp
+  };
   if cfg!(debug_assertions) && win.supports_extension("GL_KHR_debug") {
-    if set_stderr_debug_message_callback().is_ok() {
+    if gl.set_stderr_debug_message_callback().is_ok() {
       println!("Set the stderr GL debug callback.");
     } else {
       println!("`GL_KHR_debug` should be supported, but couldn't enable the debug callback.");
@@ -53,6 +75,51 @@ fn main() {
   }
 
   let mut controllers = Vec::new();
+
+  gl.set_clear_color(0.2, 0.3, 0.3, 1.0);
+
+  let vao = gl.gen_vertex_array().unwrap();
+  gl.bind_vertex_array(&vao);
+
+  type Vertex = [f32; 3];
+  let vertices: &[Vertex] =
+    &[[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]];
+
+  let vbo = gl.gen_buffer().unwrap();
+  gl.bind_buffer(ArrayBuffer, &vbo);
+  gl.alloc_buffer_data(ArrayBuffer, cast_slice(vertices), StaticDraw);
+
+  gl.enable_vertex_attrib_array(0);
+  gl.vertex_attrib_f32_pointer::<[f32; 3]>(0, size_of::<Vertex>(), 0);
+
+  let vertex_shader = gl.create_shader(VertexShader).unwrap();
+  gl.set_shader_source(&vertex_shader, VERTEX_SRC);
+  gl.compile_shader(&vertex_shader);
+  if !gl.get_shader_compile_success(&vertex_shader) {
+    let log = gl.get_shader_info_log(&vertex_shader);
+    panic!("Vertex Shader Error: {log}");
+  }
+
+  let fragment_shader = gl.create_shader(FragmentShader).unwrap();
+  gl.set_shader_source(&fragment_shader, FRAGMENT_SRC);
+  gl.compile_shader(&fragment_shader);
+  if !gl.get_shader_compile_success(&fragment_shader) {
+    let log = gl.get_shader_info_log(&fragment_shader);
+    panic!("Vertex Shader Error: {log}");
+  }
+
+  let program = gl.create_program().unwrap();
+  gl.attach_shader(&program, &vertex_shader);
+  gl.attach_shader(&program, &fragment_shader);
+  gl.link_program(&program);
+  if !gl.get_program_link_success(&program) {
+    let log = gl.get_program_info_log(&program);
+    panic!("Program Link Error: {log}");
+  }
+  gl.use_program(&program);
+  gl.delete_shader(vertex_shader);
+  gl.delete_shader(fragment_shader);
+  gl.delete_program(program);
 
   // program "main loop".
   'the_loop: loop {
@@ -65,26 +132,25 @@ fn main() {
           match sdl.open_game_controller(index) {
             Ok(controller) => {
               println!(
-                "Opened `{name}` (type: {type_:?})",
+                "Opened `{name}` (type: {ty:?})",
                 name = controller.get_name(),
-                type_ = controller.get_type()
+                ty = controller.get_type()
               );
               controllers.push(controller);
             }
             Err(msg) => println!("Couldn't open {index}: {msg:?}"),
           }
         }
-        Event::JoystickAxis { .. }
-        | Event::ControllerAxis { .. }
-        | Event::MouseMotion { .. } => (),
+        Event::ControllerButton { ctrl_id, button, pressed } => {
+          println!("{ctrl_id}: {button:?}={pressed}");
+        }
         _ => (),
       }
     }
 
-    // TODO: post-events drawing
+    gl.clear(GL_COLOR_BUFFER_BIT);
+    unsafe { gl.draw_arrays(GL_TRIANGLES, 0, 3) };
 
-    // TODO: swap buffers.
+    win.swap_window();
   }
-
-  // All the cleanup is handled by the various drop impls.
 }
