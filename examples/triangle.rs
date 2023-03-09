@@ -1,25 +1,38 @@
 use beryllium::{
   events::Event,
   init::InitFlags,
-  video::{CreateWinArgs, GlProfile},
+  video::{CreateWinArgs, GlContextFlags, GlProfile},
   Sdl,
 };
+use ezgl::set_stderr_debug_message_callback;
 use gl_struct_loader::GL;
 
 fn main() {
   // Initializes SDL2
   let sdl = Sdl::init(InitFlags::EVERYTHING);
-
-  // This part asks for an ES 3.1 context "just for fun", because that's what
-  // works best between Windows and also Raspberry Pi. Mac doesn't support ES
-  // contexts, but this is just a demo so for Mac we'll skip any configuration
-  // at all and just get some "don't care" GL context.
-  #[cfg(not(target_os = "macos"))]
-  {
+  if cfg!(target_arch = "macos") {
+    // For Mac, just ask for the best core profile supported.
+    sdl.set_gl_profile(GlProfile::Core).unwrap();
+    sdl.set_gl_context_major_version(4).unwrap();
+    sdl.set_gl_context_minor_version(1).unwrap();
+  } else {
+    // anywhere else we'll run as GLES-3.1, which desktops with GL-4.5 can
+    // provide, and this lets the app be Raspberry Pi friendly.
     sdl.set_gl_profile(GlProfile::ES).unwrap();
     sdl.set_gl_context_major_version(3).unwrap();
     sdl.set_gl_context_minor_version(1).unwrap();
   }
+  // optimistically assume that we can use multisampling.
+  sdl.set_gl_multisample_buffers(1).unwrap();
+  sdl.set_gl_multisample_count(4).unwrap();
+  let mut flags = GlContextFlags::default();
+  if cfg!(target_os = "macos") {
+    flags |= GlContextFlags::FORWARD_COMPATIBLE;
+  }
+  if cfg!(debug_assertions) {
+    flags |= GlContextFlags::DEBUG;
+  }
+  sdl.set_gl_context_flags(flags).unwrap();
 
   // Makes the window with a GL Context.
   let win = sdl
@@ -29,16 +42,13 @@ fn main() {
     })
     .unwrap();
   unsafe { GL.write().unwrap().load(|name| win.get_proc_address(name)) }
-  println!("GL window size: {:?}", win.get_window_size());
-  println!("GL drawable size: {:?}", win.get_drawable_size());
-  println!(
-    "GL_KHR_debug supported: {}",
-    win.supports_extension("GL_KHR_debug")
-  );
-  println!(
-    "has loaded ClearColor: {}",
-    GL.read().unwrap().has_loaded().ClearColor()
-  );
+  if cfg!(debug_assertions) && win.supports_extension("GL_KHR_debug") {
+    if set_stderr_debug_message_callback().is_ok() {
+      println!("Set the stderr GL debug callback.");
+    } else {
+      println!("`GL_KHR_debug` should be supported, but couldn't enable the debug callback.");
+    }
+  }
 
   let mut controllers = Vec::new();
 
@@ -65,7 +75,7 @@ fn main() {
         Event::JoystickAxis { .. }
         | Event::ControllerAxis { .. }
         | Event::MouseMotion { .. } => (),
-        _ => println!("{event:?}"),
+        _ => (),
       }
     }
 
