@@ -10,7 +10,7 @@ use gl_struct_loader::GL;
 fn main() {
   // Initializes SDL2
   let sdl = Sdl::init(InitFlags::EVERYTHING);
-  if cfg!(target_arch = "macos") {
+  if cfg!(target_os = "macos") {
     // For Mac, just ask for the best core profile supported.
     sdl.set_gl_profile(GlProfile::Core).unwrap();
     sdl.set_gl_context_major_version(4).unwrap();
@@ -48,6 +48,8 @@ fn main() {
     } else {
       println!("`GL_KHR_debug` should be supported, but couldn't enable the debug callback.");
     }
+  } else {
+    println!("Running in debug mode but `GL_KHR_debug` is not available.")
   }
 
   let mut controllers = Vec::new();
