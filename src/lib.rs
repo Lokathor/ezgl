@@ -337,6 +337,10 @@ impl EzGl {
     unsafe { self.BindTexture(target as GLenum, texture.0.get()) };
   }
   #[inline]
+  pub fn delete_texture(&self, texture: TextureObject) {
+    unsafe { self.DeleteTextures(1, &texture.0.get()) }
+  }
+  #[inline]
   pub fn alloc_tex_image_2d(
     &self, target: TextureTarget, level: GLint, bitmap: &Bitmap<RGBA8888>,
   ) {
