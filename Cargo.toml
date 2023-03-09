@@ -12,6 +12,9 @@ beryllium = "0.11.2"
 
 [dependencies]
 bytemuck = "1.13.1"
+fermium = "22604.0.0"
 gl_constants = "0.1.1"
 gl_struct_loader = "0.1.1"
 gl_types = "0.1.0"
+imagine = "0.4.0"
+ultraviolet = { version = "0.9.0", features = ["bytemuck"] }

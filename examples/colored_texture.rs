@@ -7,24 +7,53 @@ use beryllium::{
   Sdl,
 };
 use bytemuck::cast_slice;
-use ezgl::{BufferTarget::*, BufferUsageHint::*, EzGl, ShaderType::*};
-use gl_constants::{GL_COLOR_BUFFER_BIT, GL_TRIANGLES};
+use ezgl::{
+  BufferTarget::*, BufferUsageHint::*, EzGl, MagFilter, MinFilter,
+  ShaderType::*, TextureTarget::*, TextureWrap,
+};
+use gl_constants::*;
+use imagine::{image::Bitmap, pixel_formats::RGBA8888};
 
 const VERTEX_SRC: &str = "#version 310 es
   precision mediump float;
-  layout(location = 0) in vec3 pos;
-  void main() {
-    gl_Position = vec4(pos.x, pos.y, pos.z, 1.0);
+  layout (location = 0) in vec3 aPos;
+  layout (location = 1) in vec3 aColor;
+  layout (location = 2) in vec2 aTexCoord;
+  
+  out vec3 ourColor;
+  out vec2 TexCoord;
+  
+  void main()
+  {
+      gl_Position = vec4(aPos, 1.0);
+      ourColor = aColor;
+      TexCoord = aTexCoord;
   }";
 
 const FRAGMENT_SRC: &str = "#version 310 es
   precision mediump float;
-  out vec4 frag_color;
-  void main() {
-    frag_color = vec4(1.0, 0.0, 0.0, 1.0);
+  out vec4 FragColor;
+    
+  in vec3 ourColor;
+  in vec2 TexCoord;
+  
+  uniform sampler2D ourTexture;
+  
+  void main()
+  {
+      FragColor = texture(ourTexture, TexCoord) * vec4(ourColor, 1.0);
   }";
 
+const GLIDER_BYTES: &[u8] = include_bytes!("../assets/glider-big-rainbow.png");
+
+pub fn get_ticks() -> u32 {
+  unsafe { fermium::prelude::SDL_GetTicks() }
+}
+
 fn main() {
+  let glider: Bitmap<RGBA8888> =
+    Bitmap::try_from_png_bytes(GLIDER_BYTES).unwrap();
+
   // Initializes SDL2
   let sdl = Sdl::init(InitFlags::EVERYTHING);
   if cfg!(target_os = "macos") {
@@ -55,6 +84,8 @@ fn main() {
   let win = sdl
     .create_gl_window(CreateWinArgs {
       title: "Example GL Window",
+      width: 800,
+      height: 800,
       ..Default::default()
     })
     .unwrap();
@@ -81,16 +112,43 @@ fn main() {
   let vao = gl.gen_vertex_array().unwrap();
   gl.bind_vertex_array(&vao);
 
-  type Vertex = [f32; 3];
-  let vertices: &[Vertex] =
-    &[[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]];
+  type Vertex = [f32; 8];
+  let vertices: &[Vertex] = &[
+    // positions        // colors        // texture coords
+    [0.5, 0.5, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0], // top right
+    [0.5, -0.5, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0], // bottom right
+    [-0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0], // bottom left
+    [-0.5, 0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0], // top left
+  ];
+  type TriElement = [u32; 3];
+  let indices: &[TriElement] = &[[0, 1, 3], [1, 2, 3]];
 
   let vbo = gl.gen_buffer().unwrap();
   gl.bind_buffer(ArrayBuffer, &vbo);
   gl.alloc_buffer_data(ArrayBuffer, cast_slice(vertices), StaticDraw);
 
+  let ebo = gl.gen_buffer().unwrap();
+  gl.bind_buffer(ElementArrayBuffer, &ebo);
+  gl.alloc_buffer_data(ElementArrayBuffer, cast_slice(indices), StaticDraw);
+
   gl.enable_vertex_attrib_array(0);
-  gl.vertex_attrib_f32_pointer::<[f32; 3]>(0, size_of::<Vertex>(), 0);
+  gl.vertex_attrib_f32_pointer::<[f32; 3]>(
+    0,
+    size_of::<Vertex>(),
+    size_of::<[f32; 0]>(),
+  );
+  gl.enable_vertex_attrib_array(1);
+  gl.vertex_attrib_f32_pointer::<[f32; 3]>(
+    1,
+    size_of::<Vertex>(),
+    size_of::<[f32; 3]>(),
+  );
+  gl.enable_vertex_attrib_array(2);
+  gl.vertex_attrib_f32_pointer::<[f32; 2]>(
+    2,
+    size_of::<Vertex>(),
+    size_of::<[f32; 6]>(),
+  );
 
   let vertex_shader = gl.create_shader(VertexShader).unwrap();
   gl.set_shader_source(&vertex_shader, VERTEX_SRC);
@@ -117,9 +175,18 @@ fn main() {
     panic!("Program Link Error: {log}");
   }
   gl.use_program(&program);
-  gl.delete_shader(vertex_shader);
-  gl.delete_shader(fragment_shader);
-  gl.delete_program(program);
+
+  let texture = gl.gen_texture().unwrap();
+  gl.bind_texture(Texture2D, &texture);
+  gl.set_texture_wrap_s(Texture2D, TextureWrap::MirroredRepeat);
+  gl.set_texture_wrap_t(Texture2D, TextureWrap::MirroredRepeat);
+  gl.set_texture_border_color(Texture2D, &[1.0, 1.0, 0.0, 1.0]);
+  gl.set_texture_min_filter(Texture2D, MinFilter::LinearMipmapLinear);
+  gl.set_texture_mag_filter(Texture2D, MagFilter::Linear);
+  gl.alloc_tex_image_2d(Texture2D, 0, &glider);
+  gl.generate_mipmap(Texture2D);
+
+  //let loc = gl.get_uniform_location(&program, "ourColor").unwrap();
 
   // program "main loop".
   'the_loop: loop {
@@ -149,7 +216,8 @@ fn main() {
     }
 
     gl.clear(GL_COLOR_BUFFER_BIT);
-    unsafe { gl.draw_arrays(GL_TRIANGLES, 0, 3) };
+    //unsafe { gl.draw_arrays(GL_TRIANGLES, 0, 3) };
+    unsafe { gl.draw_elements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) };
 
     win.swap_window();
   }

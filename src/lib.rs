@@ -13,6 +13,7 @@ use core::{
 use gl_constants::*;
 use gl_struct_loader::*;
 use gl_types::*;
+use imagine::{image::Bitmap, pixel_formats::RGBA8888};
 
 unsafe extern "system" fn stderr_debug_message_callback(
   source: GLenum, ty: GLenum, id: GLuint, severity: GLenum, length: GLsizei,
@@ -243,6 +244,142 @@ impl EzGl {
   pub fn disable_vertex_attrib_array(&self, index: GLuint) {
     unsafe { self.DisableVertexAttribArray(index) }
   }
+  #[inline]
+  pub fn set_clear_color(&self, red: f32, green: f32, blue: f32, alpha: f32) {
+    unsafe { self.ClearColor(red, green, blue, alpha) }
+  }
+  /// Clears one or more buffers.
+  ///
+  /// Bits can be from the following list:
+  /// * `GL_COLOR_BUFFER_BIT`
+  /// * `GL_DEPTH_BUFFER_BIT`
+  /// * `GL_STENCIL_BUFFER_BIT`
+  #[inline]
+  pub fn clear(&self, mask: GLbitfield) {
+    unsafe { self.Clear(mask) }
+  }
+  #[inline]
+  pub fn get_uniform_location(
+    &self, program: &ProgramObject, name: &str,
+  ) -> Option<ShaderLocation> {
+    let name_z = format!("{name}\0");
+    let r = unsafe {
+      self.GetUniformLocation(program.0.get(), name_z.as_ptr().cast::<GLchar>())
+    };
+    if r != -1 {
+      Some(ShaderLocation(r))
+    } else {
+      None
+    }
+  }
+  #[inline]
+  pub fn set_uniform_4f(
+    &self, loc: ShaderLocation, v0: f32, v1: f32, v2: f32, v3: f32,
+  ) {
+    unsafe { self.Uniform4f(loc.0, v0, v1, v2, v3) };
+  }
+  #[inline]
+  pub fn set_texture_wrap_s(&self, target: TextureTarget, wrap: TextureWrap) {
+    unsafe {
+      self.TexParameteri(target as GLenum, GL_TEXTURE_WRAP_S, wrap as GLint)
+    }
+  }
+  #[inline]
+  pub fn set_texture_wrap_t(&self, target: TextureTarget, wrap: TextureWrap) {
+    unsafe {
+      self.TexParameteri(target as GLenum, GL_TEXTURE_WRAP_T, wrap as GLint)
+    }
+  }
+  #[inline]
+  pub fn set_texture_border_color(
+    &self, target: TextureTarget, color: &[f32; 4],
+  ) {
+    unsafe {
+      self.TexParameterfv(
+        target as GLenum,
+        GL_TEXTURE_BORDER_COLOR,
+        color.as_ptr(),
+      )
+    }
+  }
+  #[inline]
+  pub fn set_texture_min_filter(
+    &self, target: TextureTarget, filter: MinFilter,
+  ) {
+    unsafe {
+      self.TexParameteri(
+        target as GLenum,
+        GL_TEXTURE_MIN_FILTER,
+        filter as GLint,
+      )
+    }
+  }
+  #[inline]
+  pub fn set_texture_mag_filter(
+    &self, target: TextureTarget, filter: MagFilter,
+  ) {
+    unsafe {
+      self.TexParameteri(
+        target as GLenum,
+        GL_TEXTURE_MAG_FILTER,
+        filter as GLint,
+      )
+    }
+  }
+  #[inline]
+  pub fn gen_texture(&self) -> Result<TextureObject, ()> {
+    let mut obj = 0;
+    unsafe { self.GenTextures(1, &mut obj) };
+    NonZeroU32::new(obj).ok_or(()).map(TextureObject)
+  }
+  #[inline]
+  pub fn bind_texture(&self, target: TextureTarget, texture: &TextureObject) {
+    unsafe { self.BindTexture(target as GLenum, texture.0.get()) };
+  }
+  #[inline]
+  pub fn alloc_tex_image_2d(
+    &self, target: TextureTarget, level: GLint, bitmap: &Bitmap<RGBA8888>,
+  ) {
+    assert!((bitmap.width * bitmap.height) as usize == bitmap.pixels.len());
+    unsafe {
+      self.TexImage2D(
+        target as GLenum,
+        level,
+        GL_RGBA as GLint,
+        bitmap.width.try_into().unwrap(),
+        bitmap.height.try_into().unwrap(),
+        0,
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        bitmap.pixels.as_ptr().cast(),
+      )
+    }
+  }
+  #[inline]
+  pub fn generate_mipmap(&self, target: TextureTarget) {
+    unsafe { self.GenerateMipmap(target as GLenum) };
+  }
+}
+
+impl EzGl {
+  /// ## Safety
+  /// * The attrib pointers must have been properly configured
+  /// * The arguments to this function must not cause the buffer data to be read
+  ///   out of bounds.
+  #[inline]
+  pub unsafe fn draw_arrays(&self, mode: GLenum, first: GLint, count: GLsizei) {
+    self.DrawArrays(mode, first, count)
+  }
+  /// ## Safety
+  /// * The attrib pointers must have been properly configured
+  /// * The arguments to this function must not cause the buffer data to be read
+  ///   out of bounds.
+  #[inline]
+  pub unsafe fn draw_elements(
+    &self, mode: GLenum, count: GLsizei, ty: GLenum, indices: usize,
+  ) {
+    self.DrawElements(mode, count, ty, indices as *const c_void)
+  }
 }
 
 impl EzGl {
@@ -272,28 +409,6 @@ impl EzGl {
       )
     }
   }
-  /// ## Safety
-  /// * The attrib pointers must have been properly configured
-  /// * The arguments to this function must not cause the buffer data to be read
-  ///   out of bounds.
-  #[inline]
-  pub unsafe fn draw_arrays(&self, mode: GLenum, first: GLint, count: GLsizei) {
-    self.DrawArrays(mode, first, count)
-  }
-  #[inline]
-  pub fn set_clear_color(&self, red: f32, green: f32, blue: f32, alpha: f32) {
-    unsafe { self.ClearColor(red, green, blue, alpha) }
-  }
-  /// Clears one or more buffers.
-  ///
-  /// Bits can be from the following list:
-  /// * `GL_COLOR_BUFFER_BIT`
-  /// * `GL_DEPTH_BUFFER_BIT`
-  /// * `GL_STENCIL_BUFFER_BIT`
-  #[inline]
-  pub fn clear(&self, mask: GLbitfield) {
-    unsafe { self.Clear(mask) }
-  }
 }
 
 /// ## Safety
@@ -302,6 +417,11 @@ pub unsafe trait VertexAttribPointerTy {
   const SIZE: GLint;
   const TY: GLenum;
   const NORMALIZED: GLboolean;
+}
+unsafe impl VertexAttribPointerTy for [f32; 2] {
+  const SIZE: GLint = 2;
+  const NORMALIZED: GLboolean = GLboolean::FALSE;
+  const TY: GLenum = GL_FLOAT;
 }
 unsafe impl VertexAttribPointerTy for [f32; 3] {
   const SIZE: GLint = 3;
@@ -325,6 +445,14 @@ pub struct ShaderObject(NonZeroU32);
 #[repr(transparent)]
 pub struct ProgramObject(NonZeroU32);
 
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct TextureObject(NonZeroU32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct ShaderLocation(GLint);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum BufferTarget {
@@ -342,6 +470,49 @@ pub enum BufferTarget {
   TextureBuffer = GL_TEXTURE_BUFFER,
   TransformFeedbackBuffer = GL_TRANSFORM_FEEDBACK_BUFFER,
   UniformBuffer = GL_UNIFORM_BUFFER,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum TextureTarget {
+  Texture1D = GL_TEXTURE_1D,
+  Texture1DArray = GL_TEXTURE_1D_ARRAY,
+  Texture2D = GL_TEXTURE_2D,
+  Texture2DArray = GL_TEXTURE_2D_ARRAY,
+  Texture2DMultisample = GL_TEXTURE_2D_MULTISAMPLE,
+  Texture2DMultisampleArray = GL_TEXTURE_2D_MULTISAMPLE_ARRAY,
+  Texture3D = GL_TEXTURE_3D,
+  TextureCubeMap = GL_TEXTURE_CUBE_MAP,
+  TextureCubeMapArray = GL_TEXTURE_CUBE_MAP_ARRAY,
+  TextureRectangle = GL_TEXTURE_RECTANGLE,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum TextureWrap {
+  ClampToEdge = GL_CLAMP_TO_EDGE,
+  ClampToBorder = GL_CLAMP_TO_BORDER,
+  MirroredRepeat = GL_MIRRORED_REPEAT,
+  Repeat = GL_REPEAT,
+  MirrorClampToEdge = GL_MIRROR_CLAMP_TO_EDGE,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum MinFilter {
+  Nearest = GL_NEAREST,
+  Linear = GL_LINEAR,
+  NearestMipmapNearest = GL_NEAREST_MIPMAP_NEAREST,
+  LinearMipmapNearest = GL_LINEAR_MIPMAP_NEAREST,
+  NearestMipmapLinear = GL_NEAREST_MIPMAP_LINEAR,
+  LinearMipmapLinear = GL_LINEAR_MIPMAP_LINEAR,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum MagFilter {
+  Nearest = GL_NEAREST,
+  Linear = GL_LINEAR,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
