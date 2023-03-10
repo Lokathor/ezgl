@@ -111,6 +111,7 @@ fn main() {
 
   gl.enable_multisample(true);
   gl.enable_framebuffer_srgb(true);
+  gl.set_pixel_store_unpack_alignment(1);
   gl.set_clear_color(0.2, 0.3, 0.3, 1.0);
 
   let vao = gl.gen_vertex_array().unwrap();

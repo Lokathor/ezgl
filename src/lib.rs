@@ -379,6 +379,11 @@ impl EzGl {
       unsafe { self.Disable(GL_MULTISAMPLE) };
     }
   }
+  #[inline]
+  pub fn set_pixel_store_unpack_alignment(&self, align: usize) {
+    debug_assert!([1, 2, 4, 8].contains(&align));
+    unsafe { self.PixelStorei(GL_UNPACK_ALIGNMENT, align as GLint) }
+  }
 }
 
 impl EzGl {
