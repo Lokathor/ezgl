@@ -371,6 +371,14 @@ impl EzGl {
       unsafe { self.Disable(GL_FRAMEBUFFER_SRGB) };
     }
   }
+  #[inline]
+  pub fn enable_multisample(&self, enabled: bool) {
+    if enabled {
+      unsafe { self.Enable(GL_MULTISAMPLE) };
+    } else {
+      unsafe { self.Disable(GL_MULTISAMPLE) };
+    }
+  }
 }
 
 impl EzGl {

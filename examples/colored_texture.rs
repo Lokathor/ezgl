@@ -109,6 +109,7 @@ fn main() {
 
   let mut controllers = Vec::new();
 
+  gl.enable_multisample(true);
   gl.enable_framebuffer_srgb(true);
   gl.set_clear_color(0.2, 0.3, 0.3, 1.0);
 
@@ -202,7 +203,7 @@ fn main() {
           match sdl.open_game_controller(index) {
             Ok(controller) => {
               println!(
-                "Opened `{name}` (type: {ty:?})",
+                "(beryllium) Opened `{name}` (type: {ty:?})",
                 name = controller.get_name(),
                 ty = controller.get_type()
               );
