@@ -363,6 +363,14 @@ impl EzGl {
   pub fn generate_mipmap(&self, target: TextureTarget) {
     unsafe { self.GenerateMipmap(target as GLenum) };
   }
+  #[inline]
+  pub fn enable_framebuffer_srgb(&self, enabled: bool) {
+    if enabled {
+      unsafe { self.Enable(GL_FRAMEBUFFER_SRGB) };
+    } else {
+      unsafe { self.Disable(GL_FRAMEBUFFER_SRGB) };
+    }
+  }
 }
 
 impl EzGl {

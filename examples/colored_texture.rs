@@ -41,7 +41,7 @@ const FRAGMENT_SRC: &str = "#version 310 es
   
   void main()
   {
-      FragColor = texture(ourTexture, TexCoord) * vec4(ourColor, 1.0);
+      FragColor = texture(ourTexture, TexCoord);// * vec4(ourColor, 1.0);
   }";
 
 const GLIDER_BYTES: &[u8] = include_bytes!("../assets/glider-big-rainbow.png");
@@ -51,8 +51,9 @@ pub fn get_ticks() -> u32 {
 }
 
 fn main() {
-  let glider: Bitmap<RGBA8888> =
+  let mut glider: Bitmap<RGBA8888> =
     Bitmap::try_from_png_bytes(GLIDER_BYTES).unwrap();
+  glider.vertical_flip();
 
   // Initializes SDL2
   let sdl = Sdl::init(InitFlags::EVERYTHING);
@@ -71,6 +72,7 @@ fn main() {
   // optimistically assume that we can use multisampling.
   sdl.set_gl_multisample_buffers(1).unwrap();
   sdl.set_gl_multisample_count(8).unwrap();
+  sdl.set_gl_framebuffer_srgb_capable(true).unwrap();
   let mut flags = GlContextFlags::default();
   if cfg!(target_os = "macos") {
     flags |= GlContextFlags::FORWARD_COMPATIBLE;
@@ -107,6 +109,7 @@ fn main() {
 
   let mut controllers = Vec::new();
 
+  gl.enable_framebuffer_srgb(true);
   gl.set_clear_color(0.2, 0.3, 0.3, 1.0);
 
   let vao = gl.gen_vertex_array().unwrap();
