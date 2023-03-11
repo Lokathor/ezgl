@@ -4,8 +4,7 @@ description = "Easy times with GL."
 repository = "https://github.com/Lokathor/ezgl"
 version = "0.1.0"
 edition = "2021"
-
-publish = false
+license = "Zlib OR Apache-2.0 OR MIT"
 
 [dependencies]
 gl_constants = "0.1.1"
