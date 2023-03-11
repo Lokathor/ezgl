@@ -188,7 +188,13 @@ fn main() {
   gl.set_texture_border_color(Texture2D, &[1.0, 1.0, 0.0, 1.0]);
   gl.set_texture_min_filter(Texture2D, MinFilter::LinearMipmapLinear);
   gl.set_texture_mag_filter(Texture2D, MagFilter::Linear);
-  gl.alloc_tex_image_2d(Texture2D, 0, &glider);
+  gl.alloc_tex_image_2d(
+    Texture2D,
+    0,
+    glider.width as _,
+    glider.height as _,
+    cast_slice(&glider.pixels),
+  );
   gl.generate_mipmap(Texture2D);
 
   //let loc = gl.get_uniform_location(&program, "ourColor").unwrap();

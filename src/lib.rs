@@ -13,7 +13,7 @@ use core::{
 use gl_constants::*;
 use gl_struct_loader::*;
 use gl_types::*;
-use imagine::{image::Bitmap, pixel_formats::RGBA8888};
+use pixel_formats::r8g8b8a8_Srgb;
 
 unsafe extern "system" fn stderr_debug_message_callback(
   source: GLenum, ty: GLenum, id: GLuint, severity: GLenum, length: GLsizei,
@@ -342,20 +342,21 @@ impl EzGl {
   }
   #[inline]
   pub fn alloc_tex_image_2d(
-    &self, target: TextureTarget, level: GLint, bitmap: &Bitmap<RGBA8888>,
+    &self, target: TextureTarget, level: GLint, width: usize, height: usize,
+    pixels: &[r8g8b8a8_Srgb],
   ) {
-    assert!((bitmap.width * bitmap.height) as usize == bitmap.pixels.len());
+    assert!(width.saturating_mul(height) == pixels.len());
     unsafe {
       self.TexImage2D(
         target as GLenum,
         level,
-        GL_RGBA as GLint,
-        bitmap.width.try_into().unwrap(),
-        bitmap.height.try_into().unwrap(),
+        GL_SRGB8_ALPHA8 as GLint,
+        width.try_into().unwrap(),
+        height.try_into().unwrap(),
         0,
         GL_RGBA,
         GL_UNSIGNED_BYTE,
-        bitmap.pixels.as_ptr().cast(),
+        pixels.as_ptr().cast::<c_void>(),
       )
     }
   }
