@@ -65,9 +65,9 @@ fn main() {
   } else {
     // anywhere else we'll run as GLES-3.1, which a desktop's GL-4.5 can
     // provide, but which is also available on Raspberry Pi.
-    sdl.set_gl_profile(GlProfile::ES).unwrap();
+    sdl.set_gl_profile(GlProfile::Core).unwrap();
     sdl.set_gl_context_major_version(3).unwrap();
-    sdl.set_gl_context_minor_version(1).unwrap();
+    sdl.set_gl_context_minor_version(3).unwrap();
   }
   // optimistically assume that we can use multisampling.
   sdl.set_gl_multisample_buffers(1).unwrap();
