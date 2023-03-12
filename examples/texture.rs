@@ -123,7 +123,7 @@ fn main() {
   type Vertex = [f32; 5];
   #[rustfmt::skip]
   let vertices: &[Vertex] = &[
-    // positions        // colors    // texture coords
+  // positions    // texture coords
     [1.0, 1.0, 0.0,   1.0, 1.0], // top right
     [1.0, -1.0, 0.0,  1.0, 0.0], // bottom right
     [-1.0, -1.0, 0.0, 0.0, 0.0], // bottom left
