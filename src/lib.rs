@@ -4,6 +4,8 @@
 #![allow(clippy::result_unit_err)]
 #![warn(clippy::missing_inline_in_public_items)]
 
+pub use gl_constants;
+
 use core::{
   num::NonZeroU32,
   ops::{Deref, DerefMut},
