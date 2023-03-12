@@ -345,7 +345,7 @@ impl EzGl {
     &self, target: TextureTarget, level: GLint, width: usize, height: usize,
     pixels: &[r8g8b8a8_Srgb],
   ) {
-    assert!(width.saturating_mul(height) == pixels.len());
+    assert!(width.checked_mul(height).unwrap() == pixels.len());
     unsafe {
       self.TexImage2D(
         target as GLenum,
