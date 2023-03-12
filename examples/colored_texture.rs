@@ -14,8 +14,17 @@ use ezgl::{
 use gl_constants::*;
 use imagine::{image::Bitmap, pixel_formats::RGBA8888};
 
-const VERTEX_SRC: &str = "#version 310 es
-  precision mediump float;
+const USE_GLES: bool =
+  cfg!(target_arch = "aarch64") || cfg!(target_arch = "arm");
+
+const GL_HEADER: &str = "#version 410 es
+";
+
+const GLES_HEADER: &str = "#version 310 es
+precision mediump float;
+";
+
+const VERTEX_SRC: &str = "
   layout (location = 0) in vec3 aPos;
   layout (location = 1) in vec3 aColor;
   layout (location = 2) in vec2 aTexCoord;
@@ -30,8 +39,7 @@ const VERTEX_SRC: &str = "#version 310 es
       TexCoord = aTexCoord;
   }";
 
-const FRAGMENT_SRC: &str = "#version 310 es
-  precision mediump float;
+const FRAGMENT_SRC: &str = "
   out vec4 FragColor;
     
   in vec3 ourColor;
@@ -57,21 +65,22 @@ fn main() {
 
   // Initializes SDL2
   let sdl = Sdl::init(InitFlags::EVERYTHING);
-  if cfg!(target_os = "macos") {
-    // For Mac, just ask for the best core profile supported.
+  if USE_GLES {
+    // When on Aarch64 or ARM, assume that we're building for some sort of
+    // raspberry pi situation and use GLES-3.1 (best available on pi)
+    sdl.set_gl_profile(GlProfile::ES).unwrap();
+    sdl.set_gl_context_major_version(3).unwrap();
+    sdl.set_gl_context_minor_version(1).unwrap();
+  } else {
+    // For "normal" desktops we will use GL-4.1, which is the best that Mac can
+    // offer.
     sdl.set_gl_profile(GlProfile::Core).unwrap();
     sdl.set_gl_context_major_version(4).unwrap();
     sdl.set_gl_context_minor_version(1).unwrap();
-  } else {
-    // anywhere else we'll run as GLES-3.1, which a desktop's GL-4.5 can
-    // provide, but which is also available on Raspberry Pi.
-    sdl.set_gl_profile(GlProfile::Core).unwrap();
-    sdl.set_gl_context_major_version(3).unwrap();
-    sdl.set_gl_context_minor_version(3).unwrap();
   }
   // optimistically assume that we can use multisampling.
   sdl.set_gl_multisample_buffers(1).unwrap();
-  sdl.set_gl_multisample_count(8).unwrap();
+  sdl.set_gl_multisample_count(4).unwrap();
   sdl.set_gl_framebuffer_srgb_capable(true).unwrap();
   let mut flags = GlContextFlags::default();
   if cfg!(target_os = "macos") {
@@ -109,8 +118,10 @@ fn main() {
 
   let mut controllers = Vec::new();
 
-  gl.enable_multisample(true);
-  gl.enable_framebuffer_srgb(true);
+  if !USE_GLES {
+    gl.enable_multisample(true);
+    gl.enable_framebuffer_srgb(true);
+  }
   gl.set_pixel_store_unpack_alignment(1);
   gl.set_clear_color(0.2, 0.3, 0.3, 1.0);
 
@@ -155,8 +166,10 @@ fn main() {
     size_of::<[f32; 6]>(),
   );
 
+  let header = if USE_GLES { GLES_HEADER } else { GL_HEADER };
   let vertex_shader = gl.create_shader(VertexShader).unwrap();
-  gl.set_shader_source(&vertex_shader, VERTEX_SRC);
+  let vertex_src = format!("{header}\n{VERTEX_SRC}");
+  gl.set_shader_source(&vertex_shader, &vertex_src);
   gl.compile_shader(&vertex_shader);
   if !gl.get_shader_compile_success(&vertex_shader) {
     let log = gl.get_shader_info_log(&vertex_shader);
@@ -164,7 +177,8 @@ fn main() {
   }
 
   let fragment_shader = gl.create_shader(FragmentShader).unwrap();
-  gl.set_shader_source(&fragment_shader, FRAGMENT_SRC);
+  let fragment_src = format!("{header}\n{FRAGMENT_SRC}");
+  gl.set_shader_source(&fragment_shader, &fragment_src);
   gl.compile_shader(&fragment_shader);
   if !gl.get_shader_compile_success(&fragment_shader) {
     let log = gl.get_shader_info_log(&fragment_shader);
