@@ -17,46 +17,38 @@ use imagine::{image::Bitmap, pixel_formats::RGBA8888};
 const USE_GLES: bool =
   cfg!(target_arch = "aarch64") || cfg!(target_arch = "arm");
 
-const GL_HEADER: &str = "#version 410 es
+const GL_SHADER_HEADER: &str = "#version 410
 ";
 
-const GLES_HEADER: &str = "#version 310 es
+const GLES_SHADER_HEADER: &str = "#version 310 es
 precision mediump float;
 ";
 
 const VERTEX_SRC: &str = "
   layout (location = 0) in vec3 aPos;
-  layout (location = 1) in vec3 aColor;
-  layout (location = 2) in vec2 aTexCoord;
+  layout (location = 1) in vec2 aTexCoord;
   
-  out vec3 ourColor;
   out vec2 TexCoord;
   
   void main()
   {
       gl_Position = vec4(aPos, 1.0);
-      ourColor = aColor;
       TexCoord = aTexCoord;
   }";
 
 const FRAGMENT_SRC: &str = "
   out vec4 FragColor;
-    
-  in vec3 ourColor;
+
   in vec2 TexCoord;
   
   uniform sampler2D ourTexture;
   
   void main()
   {
-      FragColor = texture(ourTexture, TexCoord);// * vec4(ourColor, 1.0);
+      FragColor = texture(ourTexture, TexCoord);
   }";
 
 const GLIDER_BYTES: &[u8] = include_bytes!("../assets/glider-big-rainbow.png");
-
-pub fn get_ticks() -> u32 {
-  unsafe { fermium::prelude::SDL_GetTicks() }
-}
 
 fn main() {
   let mut glider: Bitmap<RGBA8888> =
@@ -64,7 +56,7 @@ fn main() {
   glider.vertical_flip();
 
   // Initializes SDL2
-  let sdl = Sdl::init(InitFlags::EVERYTHING);
+  let sdl = Sdl::init(InitFlags::VIDEO);
   if USE_GLES {
     // When on Aarch64 or ARM, assume that we're building for some sort of
     // raspberry pi situation and use GLES-3.1 (best available on pi)
@@ -80,7 +72,7 @@ fn main() {
   }
   // optimistically assume that we can use multisampling.
   sdl.set_gl_multisample_buffers(1).unwrap();
-  sdl.set_gl_multisample_count(4).unwrap();
+  sdl.set_gl_multisample_count(if USE_GLES { 4 } else { 8 }).unwrap();
   sdl.set_gl_framebuffer_srgb_capable(true).unwrap();
   let mut flags = GlContextFlags::default();
   if cfg!(target_os = "macos") {
@@ -95,8 +87,8 @@ fn main() {
   let win = sdl
     .create_gl_window(CreateWinArgs {
       title: "Example GL Window",
-      width: 800,
-      height: 800,
+      width: glider.width.try_into().unwrap(),
+      height: glider.height.try_into().unwrap(),
       ..Default::default()
     })
     .unwrap();
@@ -128,13 +120,14 @@ fn main() {
   let vao = gl.gen_vertex_array().unwrap();
   gl.bind_vertex_array(&vao);
 
-  type Vertex = [f32; 8];
+  type Vertex = [f32; 5];
+  #[rustfmt::skip]
   let vertices: &[Vertex] = &[
-    // positions        // colors        // texture coords
-    [0.5, 0.5, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0], // top right
-    [0.5, -0.5, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0], // bottom right
-    [-0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0], // bottom left
-    [-0.5, 0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0], // top left
+    // positions        // colors    // texture coords
+    [1.0, 1.0, 0.0,   1.0, 1.0], // top right
+    [1.0, -1.0, 0.0,  1.0, 0.0], // bottom right
+    [-1.0, -1.0, 0.0, 0.0, 0.0], // bottom left
+    [-1.0, 1.0, 0.0,  0.0, 1.0], // top left
   ];
   type TriElement = [u32; 3];
   let indices: &[TriElement] = &[[0, 1, 3], [1, 2, 3]];
@@ -154,21 +147,16 @@ fn main() {
     size_of::<[f32; 0]>(),
   );
   gl.enable_vertex_attrib_array(1);
-  gl.vertex_attrib_f32_pointer::<[f32; 3]>(
+  gl.vertex_attrib_f32_pointer::<[f32; 2]>(
     1,
     size_of::<Vertex>(),
     size_of::<[f32; 3]>(),
   );
-  gl.enable_vertex_attrib_array(2);
-  gl.vertex_attrib_f32_pointer::<[f32; 2]>(
-    2,
-    size_of::<Vertex>(),
-    size_of::<[f32; 6]>(),
-  );
 
-  let header = if USE_GLES { GLES_HEADER } else { GL_HEADER };
+  let shader_header =
+    if USE_GLES { GLES_SHADER_HEADER } else { GL_SHADER_HEADER };
   let vertex_shader = gl.create_shader(VertexShader).unwrap();
-  let vertex_src = format!("{header}\n{VERTEX_SRC}");
+  let vertex_src = format!("{shader_header}\n{VERTEX_SRC}");
   gl.set_shader_source(&vertex_shader, &vertex_src);
   gl.compile_shader(&vertex_shader);
   if !gl.get_shader_compile_success(&vertex_shader) {
@@ -177,7 +165,7 @@ fn main() {
   }
 
   let fragment_shader = gl.create_shader(FragmentShader).unwrap();
-  let fragment_src = format!("{header}\n{FRAGMENT_SRC}");
+  let fragment_src = format!("{shader_header}\n{FRAGMENT_SRC}");
   gl.set_shader_source(&fragment_shader, &fragment_src);
   gl.compile_shader(&fragment_shader);
   if !gl.get_shader_compile_success(&fragment_shader) {
@@ -205,8 +193,8 @@ fn main() {
   gl.alloc_tex_image_2d(
     Texture2D,
     0,
-    glider.width as _,
-    glider.height as _,
+    glider.width.try_into().unwrap(),
+    glider.height.try_into().unwrap(),
     cast_slice(&glider.pixels),
   );
   gl.generate_mipmap(Texture2D);
