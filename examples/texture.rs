@@ -7,12 +7,12 @@ use beryllium::{
 use bytemuck::cast_slice;
 use core::mem::size_of;
 use ezgl::{
-  BlendEquationSeparate, BlendFuncSeparate, BufferTarget::*,
-  BufferUsageHint::*, DrawMode, EzGl, MagFilter, MinFilter, TextureTarget::*,
-  TextureWrap,
+  BlendEquationSeparate, BlendFuncSeparate, BufferTarget::*, BufferUsageHint::*,
+  DrawMode, EzGl, MagFilter, MinFilter, TextureTarget::*, TextureWrap,
 };
 use imagine::{image::Bitmap, pixel_formats::RGBA8888};
 use pixel_formats::{r32g32b32a32_Sfloat, r8g8b8a8_Srgb};
+use ultraviolet::{Mat4, Vec3};
 
 macro_rules! check {
   ($gl:ident.$method:ident) => {
@@ -20,8 +20,7 @@ macro_rules! check {
   };
 }
 
-const USE_GLES: bool =
-  cfg!(target_arch = "aarch64") || cfg!(target_arch = "arm");
+const USE_GLES: bool = cfg!(target_arch = "aarch64") || cfg!(target_arch = "arm");
 
 const GL_SHADER_HEADER: &str = "#version 410
 ";
@@ -31,34 +30,42 @@ precision mediump float;
 ";
 
 const VERTEX_SRC: &str = "
-  layout (location = 0) in vec3 aPos;
-  layout (location = 1) in vec2 aTexCoord;
-  
-  out vec2 TexCoord;
-  
-  void main()
-  {
-    gl_Position = vec4(aPos, 1.0);
-    TexCoord = aTexCoord;
-  }";
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec2 aTexCoord;
+
+out vec2 TexCoord;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+void main()
+{
+	gl_Position = projection * view * model * vec4(aPos, 1.0);
+	TexCoord = vec2(aTexCoord.x, aTexCoord.y);
+}";
 
 const FRAGMENT_SRC: &str = "
-  out vec4 FragColor;
+out vec4 FragColor;
 
-  in vec2 TexCoord;
-  
-  uniform sampler2D ourTexture;
-  
-  void main()
-  {
-    FragColor = texture(ourTexture, TexCoord);
-  }";
+in vec2 TexCoord;
+
+// texture samplers
+uniform sampler2D texture1;
+uniform sampler2D texture2;
+
+void main()
+{
+	// linearly interpolate between both textures (80% container, 20% awesomeface)
+	FragColor = mix(texture(texture1, TexCoord), texture(texture2, TexCoord), 0.2);
+}";
 
 const GLIDER_BYTES: &[u8] = include_bytes!("../assets/glider-big-rainbow.png");
 
 fn main() {
-  let mut glider: Bitmap<RGBA8888> =
-    Bitmap::try_from_png_bytes(GLIDER_BYTES).unwrap();
+  let width = 800;
+  let height = 600;
+  let mut glider: Bitmap<RGBA8888> = Bitmap::try_from_png_bytes(GLIDER_BYTES).unwrap();
   glider.vertical_flip();
 
   // Initializes SDL2
@@ -91,8 +98,8 @@ fn main() {
   let win = sdl
     .create_gl_window(CreateWinArgs {
       title: "Example GL Window",
-      width: glider.width.try_into().unwrap(),
-      height: glider.height.try_into().unwrap(),
+      width,
+      height,
       ..Default::default()
     })
     .unwrap();
@@ -107,7 +114,9 @@ fn main() {
       if gl.set_stderr_debug_message_callback().is_ok() {
         eprintln!("Set the stderr GL debug callback.");
       } else {
-        eprintln!("`GL_KHR_debug` should be supported, but couldn't enable the debug callback.");
+        eprintln!(
+          "`GL_KHR_debug` should be supported, but couldn't enable the debug callback."
+        );
       }
     } else {
       eprintln!("Running in debug mode but `GL_KHR_debug` is not available.")
@@ -121,13 +130,10 @@ fn main() {
     gl.enable_framebuffer_srgb(true);
   }
   gl.set_pixel_store_unpack_alignment(1);
-  gl.set_clear_color(1.0, 0.0, 1.0, 1.0);
+  gl.set_clear_color(0.0, 0.1, 0.1, 1.0);
   gl.enable_depth_test(true);
   // https://www.realtimerendering.com/blog/gpus-prefer-premultiplication/
-  gl.set_blend_equation_separate(
-    BlendEquationSeparate::Add,
-    BlendEquationSeparate::Add,
-  );
+  gl.set_blend_equation_separate(BlendEquationSeparate::Add, BlendEquationSeparate::Add);
   gl.set_blend_func_separate(
     BlendFuncSeparate::One,
     BlendFuncSeparate::OneMinusSrcAlpha,
@@ -141,11 +147,11 @@ fn main() {
   type Vertex = [f32; 5];
   #[rustfmt::skip]
   let vertices: &[Vertex] = &[
-    // positions      // texture coords
-    [1.0, 1.0, 0.0,   1.0, 1.0], // top right
-    [1.0, -1.0, 0.0,  1.0, 0.0], // bottom right
-    [-1.0, -1.0, 0.0, 0.0, 0.0], // bottom left
-    [-1.0, 1.0, 0.0,  0.0, 1.0], // top left
+     // positions      // texture coords
+    [ 0.5,  0.5, 0.0,  1.0, 1.0], // top right
+    [ 0.5, -0.5, 0.0,  1.0, 0.0], // bottom right
+    [-0.5, -0.5, 0.0,  0.0, 0.0], // bottom left
+    [-0.5,  0.5, 0.0,  0.0, 1.0], // top left
   ];
   type TriElement = [u32; 3];
   let indices: &[TriElement] = &[[0, 1, 3], [1, 2, 3]];
@@ -159,26 +165,23 @@ fn main() {
   gl.buffer_data(ElementArrayBuffer, cast_slice(indices), StaticDraw);
 
   gl.enable_vertex_attrib_array(0);
-  gl.vertex_attrib_f32_pointer::<[f32; 3]>(
-    0,
-    size_of::<Vertex>(),
-    size_of::<[f32; 0]>(),
-  );
+  gl.vertex_attrib_f32_pointer::<[f32; 3]>(0, size_of::<Vertex>(), size_of::<[f32; 0]>());
   gl.enable_vertex_attrib_array(1);
-  gl.vertex_attrib_f32_pointer::<[f32; 2]>(
-    1,
-    size_of::<Vertex>(),
-    size_of::<[f32; 3]>(),
-  );
+  gl.vertex_attrib_f32_pointer::<[f32; 2]>(1, size_of::<Vertex>(), size_of::<[f32; 3]>());
 
-  let shader_header =
-    if USE_GLES { GLES_SHADER_HEADER } else { GL_SHADER_HEADER };
+  let shader_header = if USE_GLES { GLES_SHADER_HEADER } else { GL_SHADER_HEADER };
   let vertex_src = format!("{shader_header}\n{VERTEX_SRC}");
   let fragment_src = format!("{shader_header}\n{FRAGMENT_SRC}");
-  let program =
-    gl.create_vertex_fragment_program(&vertex_src, &fragment_src).unwrap();
+  let program = gl.create_vertex_fragment_program(&vertex_src, &fragment_src).unwrap();
   gl.use_program(&program);
 
+  let model_loc = gl.get_uniform_location(&program, "model").unwrap();
+  let view_loc = gl.get_uniform_location(&program, "view").unwrap();
+  let projection_loc = gl.get_uniform_location(&program, "projection").unwrap();
+  let tex1_loc = gl.get_uniform_location(&program, "texture1").unwrap();
+  let tex2_loc = gl.get_uniform_location(&program, "texture2").unwrap();
+
+  gl.set_active_texture_unit(1);
   let yellow = r32g32b32a32_Sfloat { r: 1.0, g: 1.0, b: 0.0, a: 1.0 };
   let texture = gl.gen_texture().unwrap();
   gl.bind_texture(Texture2D, &texture);
@@ -196,7 +199,8 @@ fn main() {
   );
   gl.generate_mipmap(Texture2D);
 
-  //let loc = gl.get_uniform_location(&program, "ourColor").unwrap();
+  gl.set_uniform_sampler2D(tex1_loc, 1);
+  gl.set_uniform_sampler2D(tex2_loc, 1);
 
   // program "main loop".
   'the_loop: loop {
@@ -209,6 +213,19 @@ fn main() {
         _ => (),
       }
     }
+
+    let model = Mat4::from_rotation_z(45.0_f32.to_radians());
+    let view = Mat4::from_translation(Vec3 { x: 0.0, y: 0.0, z: -3.0 });
+    let projection = ultraviolet::projection::perspective_gl(
+      45.0_f32.to_radians(),
+      (width as f32) / (height as f32),
+      0.1,
+      100.0,
+    );
+
+    gl.set_uniform_mat4(model_loc, model.as_array());
+    gl.set_uniform_mat4(view_loc, view.as_array());
+    gl.set_uniform_mat4(projection_loc, projection.as_array());
 
     gl.clear_color_and_depth_buffer();
     //unsafe { gl.draw_arrays(DrawMode::Triangles, 0..3) };

@@ -50,9 +50,8 @@ unsafe extern "system" fn stderr_debug_message_callback(
     GL_DEBUG_SEVERITY_NOTIFICATION => "Note",
     _ => "OtherSeverity",
   };
-  let message_bytes = unsafe {
-    slice_from_raw_parts(message.cast::<u8>(), length.try_into().unwrap())
-  };
+  let message_bytes =
+    unsafe { slice_from_raw_parts(message.cast::<u8>(), length.try_into().unwrap()) };
   let message = String::from_utf8_lossy(message_bytes);
   eprintln!("{source}>{ty}>{id}>{severity}>{message}");
 }
@@ -90,8 +89,7 @@ impl EzGl {
     } else if self.has_loaded().DebugMessageCallbackKHR() {
       // GLES uses an alternate name but the extension operates the same.
       Ok(unsafe {
-        self
-          .DebugMessageCallbackKHR(Some(stderr_debug_message_callback), null())
+        self.DebugMessageCallbackKHR(Some(stderr_debug_message_callback), null())
       })
     } else {
       Err(())
@@ -130,9 +128,7 @@ impl EzGl {
   ///
   /// Khronos: [glBufferData](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBufferData.xhtml)
   #[inline]
-  pub fn buffer_data(
-    &self, target: BufferTarget, data: &[u8], usage: BufferUsageHint,
-  ) {
+  pub fn buffer_data(&self, target: BufferTarget, data: &[u8], usage: BufferUsageHint) {
     unsafe {
       self.BufferData(
         target as GLenum,
@@ -143,9 +139,7 @@ impl EzGl {
     }
   }
   #[inline]
-  pub fn create_shader(
-    &self, shader_type: ShaderType,
-  ) -> Result<ShaderObject, ()> {
+  pub fn create_shader(&self, shader_type: ShaderType) -> Result<ShaderObject, ()> {
     NonZeroU32::new(unsafe { self.CreateShader(shader_type as GLenum) })
       .ok_or(())
       .map(ShaderObject)
@@ -189,9 +183,7 @@ impl EzGl {
   }
   #[inline]
   pub fn create_program(&self) -> Result<ProgramObject, ()> {
-    NonZeroU32::new(unsafe { self.CreateProgram() })
-      .ok_or(())
-      .map(ProgramObject)
+    NonZeroU32::new(unsafe { self.CreateProgram() }).ok_or(()).map(ProgramObject)
   }
   #[inline]
   pub fn attach_shader(&self, program: &ProgramObject, shader: &ShaderObject) {
@@ -297,21 +289,15 @@ impl EzGl {
   }
   #[inline]
   pub fn set_uniform_mat4(&self, loc: ShaderLocation, mat4s: &[f32; 16]) {
-    unsafe {
-      self.UniformMatrix4fv(loc.0, 1, GLboolean::FALSE, mat4s.as_ptr())
-    };
+    unsafe { self.UniformMatrix4fv(loc.0, 1, GLboolean::FALSE, mat4s.as_ptr()) };
   }
   #[inline]
   pub fn set_texture_wrap_s(&self, target: TextureTarget, wrap: TextureWrap) {
-    unsafe {
-      self.TexParameteri(target as GLenum, GL_TEXTURE_WRAP_S, wrap as GLint)
-    }
+    unsafe { self.TexParameteri(target as GLenum, GL_TEXTURE_WRAP_S, wrap as GLint) }
   }
   #[inline]
   pub fn set_texture_wrap_t(&self, target: TextureTarget, wrap: TextureWrap) {
-    unsafe {
-      self.TexParameteri(target as GLenum, GL_TEXTURE_WRAP_T, wrap as GLint)
-    }
+    unsafe { self.TexParameteri(target as GLenum, GL_TEXTURE_WRAP_T, wrap as GLint) }
   }
   #[inline]
   pub fn set_texture_border_color(
@@ -326,27 +312,15 @@ impl EzGl {
     }
   }
   #[inline]
-  pub fn set_texture_min_filter(
-    &self, target: TextureTarget, filter: MinFilter,
-  ) {
+  pub fn set_texture_min_filter(&self, target: TextureTarget, filter: MinFilter) {
     unsafe {
-      self.TexParameteri(
-        target as GLenum,
-        GL_TEXTURE_MIN_FILTER,
-        filter as GLint,
-      )
+      self.TexParameteri(target as GLenum, GL_TEXTURE_MIN_FILTER, filter as GLint)
     }
   }
   #[inline]
-  pub fn set_texture_mag_filter(
-    &self, target: TextureTarget, filter: MagFilter,
-  ) {
+  pub fn set_texture_mag_filter(&self, target: TextureTarget, filter: MagFilter) {
     unsafe {
-      self.TexParameteri(
-        target as GLenum,
-        GL_TEXTURE_MAG_FILTER,
-        filter as GLint,
-      )
+      self.TexParameteri(target as GLenum, GL_TEXTURE_MAG_FILTER, filter as GLint)
     }
   }
   #[inline]
@@ -365,8 +339,7 @@ impl EzGl {
   }
   #[inline]
   pub fn tex_image_2d<P: TexImage2dPixelTy>(
-    &self, target: TextureTarget, level: GLint, width: usize, height: usize,
-    pixels: &[P],
+    &self, target: TextureTarget, level: GLint, width: usize, height: usize, pixels: &[P],
   ) {
     assert!(width.checked_mul(height).unwrap() == pixels.len());
     unsafe {
@@ -428,9 +401,9 @@ impl EzGl {
   pub fn create_shader_with_source(
     &self, shader_type: ShaderType, src: &str,
   ) -> Result<ShaderObject, Box<str>> {
-    let vertex_shader = self.create_shader(shader_type).map_err(|_| {
-      String::from("Couldn't create a new shader ID.").into_boxed_str()
-    })?;
+    let vertex_shader = self
+      .create_shader(shader_type)
+      .map_err(|_| String::from("Couldn't create a new shader ID.").into_boxed_str())?;
     self.set_shader_source(&vertex_shader, src);
     self.compile_shader(&vertex_shader);
     if self.get_shader_compile_success(&vertex_shader) {
@@ -445,13 +418,11 @@ impl EzGl {
   pub fn create_vertex_fragment_program(
     &self, vertex_src: &str, fragment_src: &str,
   ) -> Result<ProgramObject, Box<str>> {
-    let v =
-      self.create_shader_with_source(ShaderType::VertexShader, vertex_src)?;
-    let f = self
-      .create_shader_with_source(ShaderType::FragmentShader, fragment_src)?;
-    let program = self.create_program().map_err(|_| {
-      String::from("Couldn't create a new program ID.").into_boxed_str()
-    })?;
+    let v = self.create_shader_with_source(ShaderType::VertexShader, vertex_src)?;
+    let f = self.create_shader_with_source(ShaderType::FragmentShader, fragment_src)?;
+    let program = self
+      .create_program()
+      .map_err(|_| String::from("Couldn't create a new program ID.").into_boxed_str())?;
     self.attach_shader(&program, &v);
     self.attach_shader(&program, &f);
     self.link_program(&program);
@@ -509,12 +480,7 @@ impl EzGl {
     src_alpha: BlendFuncSeparate, dst_alpha: BlendFuncSeparate,
   ) {
     unsafe {
-      self.BlendFuncSeparate(
-        src_rgb as _,
-        dst_rgb as _,
-        src_alpha as _,
-        dst_alpha as _,
-      )
+      self.BlendFuncSeparate(src_rgb as _, dst_rgb as _, src_alpha as _, dst_alpha as _)
     }
   }
 }
@@ -537,11 +503,7 @@ impl EzGl {
     assert!(range.start < range.end);
     let first = range.start;
     let count = range.end - range.start;
-    self.DrawArrays(
-      mode as GLenum,
-      first.try_into().unwrap(),
-      count.try_into().unwrap(),
-    )
+    self.DrawArrays(mode as GLenum, first.try_into().unwrap(), count.try_into().unwrap())
   }
 
   /// Draws using the element buffer.
