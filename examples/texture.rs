@@ -7,11 +7,12 @@ use beryllium::{
 use bytemuck::cast_slice;
 use core::mem::size_of;
 use ezgl::{
-  BufferTarget::*, BufferUsageHint::*, DrawMode, EzGl, MagFilter, MinFilter,
-  TextureTarget::*, TextureWrap,
+  BlendEquationSeparate, BlendFuncSeparate, BufferTarget::*,
+  BufferUsageHint::*, DrawMode, EzGl, MagFilter, MinFilter, TextureTarget::*,
+  TextureWrap,
 };
 use imagine::{image::Bitmap, pixel_formats::RGBA8888};
-use pixel_formats::r32g32b32a32_Sfloat;
+use pixel_formats::{r32g32b32a32_Sfloat, r8g8b8a8_Srgb};
 
 macro_rules! check {
   ($gl:ident.$method:ident) => {
@@ -121,6 +122,18 @@ fn main() {
   }
   gl.set_pixel_store_unpack_alignment(1);
   gl.set_clear_color(1.0, 0.0, 1.0, 1.0);
+  gl.enable_depth_test(true);
+  // https://www.realtimerendering.com/blog/gpus-prefer-premultiplication/
+  gl.set_blend_equation_separate(
+    BlendEquationSeparate::Add,
+    BlendEquationSeparate::Add,
+  );
+  gl.set_blend_func_separate(
+    BlendFuncSeparate::One,
+    BlendFuncSeparate::OneMinusSrcAlpha,
+    BlendFuncSeparate::One,
+    BlendFuncSeparate::OneMinusSrcAlpha,
+  );
 
   let vao = gl.gen_vertex_array().unwrap();
   gl.bind_vertex_array(&vao);
@@ -179,7 +192,7 @@ fn main() {
     0,
     glider.width.try_into().unwrap(),
     glider.height.try_into().unwrap(),
-    cast_slice(&glider.pixels),
+    cast_slice::<_, r8g8b8a8_Srgb>(&glider.pixels),
   );
   gl.generate_mipmap(Texture2D);
 

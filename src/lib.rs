@@ -15,7 +15,9 @@ use core::{
 use gl_constants::*;
 use gl_struct_loader::*;
 use gl_types::*;
-use pixel_formats::{r32g32b32a32_Sfloat, r8g8b8a8_Srgb};
+use pixel_formats::{
+  r32g32b32a32_Sfloat, r8g8b8_Srgb, r8g8b8_Unorm, r8g8b8a8_Srgb, r8g8b8a8_Unorm,
+};
 
 unsafe extern "system" fn stderr_debug_message_callback(
   source: GLenum, ty: GLenum, id: GLuint, severity: GLenum, length: GLsizei,
@@ -283,10 +285,21 @@ impl EzGl {
     }
   }
   #[inline]
-  pub fn set_uniform_4f(
+  #[allow(non_snake_case)]
+  pub fn set_uniform_sampler2D(&self, loc: ShaderLocation, v0: GLint) {
+    unsafe { self.Uniform1i(loc.0, v0) };
+  }
+  #[inline]
+  pub fn set_uniform_vec4(
     &self, loc: ShaderLocation, v0: f32, v1: f32, v2: f32, v3: f32,
   ) {
     unsafe { self.Uniform4f(loc.0, v0, v1, v2, v3) };
+  }
+  #[inline]
+  pub fn set_uniform_mat4(&self, loc: ShaderLocation, mat4s: &[f32; 16]) {
+    unsafe {
+      self.UniformMatrix4fv(loc.0, 1, GLboolean::FALSE, mat4s.as_ptr())
+    };
   }
   #[inline]
   pub fn set_texture_wrap_s(&self, target: TextureTarget, wrap: TextureWrap) {
@@ -351,21 +364,21 @@ impl EzGl {
     unsafe { self.DeleteTextures(1, &texture.0.get()) }
   }
   #[inline]
-  pub fn tex_image_2d(
+  pub fn tex_image_2d<P: TexImage2dPixelTy>(
     &self, target: TextureTarget, level: GLint, width: usize, height: usize,
-    pixels: &[r8g8b8a8_Srgb],
+    pixels: &[P],
   ) {
     assert!(width.checked_mul(height).unwrap() == pixels.len());
     unsafe {
       self.TexImage2D(
         target as GLenum,
         level,
-        GL_SRGB8_ALPHA8 as GLint,
+        P::INTERNAL_FORMAT,
         width.try_into().unwrap(),
         height.try_into().unwrap(),
         0,
-        GL_RGBA,
-        GL_UNSIGNED_BYTE,
+        P::FORMAT,
+        P::TY,
         pixels.as_ptr().cast::<c_void>(),
       )
     }
@@ -396,6 +409,14 @@ impl EzGl {
       unsafe { self.Enable(GL_DEPTH_TEST) };
     } else {
       unsafe { self.Disable(GL_DEPTH_TEST) };
+    }
+  }
+  #[inline]
+  pub fn enable_blend(&self, enabled: bool) {
+    if enabled {
+      unsafe { self.Enable(GL_BLEND) };
+    } else {
+      unsafe { self.Disable(GL_BLEND) };
     }
   }
   #[inline]
@@ -476,6 +497,26 @@ impl EzGl {
     unsafe { self.GetIntegerv(GL_ACTIVE_TEXTURE, &mut out) };
     u32::try_from(out).unwrap() - GL_TEXTURE0
   }
+  #[inline]
+  pub fn set_blend_equation_separate(
+    &self, rgb: BlendEquationSeparate, alpha: BlendEquationSeparate,
+  ) {
+    unsafe { self.BlendEquationSeparate(rgb as _, alpha as _) }
+  }
+  #[inline]
+  pub fn set_blend_func_separate(
+    &self, src_rgb: BlendFuncSeparate, dst_rgb: BlendFuncSeparate,
+    src_alpha: BlendFuncSeparate, dst_alpha: BlendFuncSeparate,
+  ) {
+    unsafe {
+      self.BlendFuncSeparate(
+        src_rgb as _,
+        dst_rgb as _,
+        src_alpha as _,
+        dst_alpha as _,
+      )
+    }
+  }
 }
 
 impl EzGl {
@@ -528,7 +569,7 @@ impl EzGl {
     self.DrawElements(
       mode as GLenum,
       count.try_into().unwrap(),
-      T::ENUM,
+      T::TY,
       base as *const c_void,
     )
   }
@@ -539,16 +580,51 @@ impl EzGl {
 /// ## Safety
 /// * You cannot implement this trait.
 pub unsafe trait DrawElementsType {
-  const ENUM: GLenum;
+  const TY: GLenum;
 }
 unsafe impl DrawElementsType for u8 {
-  const ENUM: GLenum = GL_UNSIGNED_BYTE;
+  const TY: GLenum = GL_UNSIGNED_BYTE;
 }
 unsafe impl DrawElementsType for u16 {
-  const ENUM: GLenum = GL_UNSIGNED_SHORT;
+  const TY: GLenum = GL_UNSIGNED_SHORT;
 }
 unsafe impl DrawElementsType for u32 {
-  const ENUM: GLenum = GL_UNSIGNED_INT;
+  const TY: GLenum = GL_UNSIGNED_INT;
+}
+
+/// Trait for pixel types compatible with [`tex_image_2d`](EzGl::tex_image_2d)
+///
+/// ## Safety
+/// * You cannot implement this trait.
+pub unsafe trait TexImage2dPixelTy {
+  const INTERNAL_FORMAT: GLint;
+  const FORMAT: GLenum;
+  const TY: GLenum;
+}
+unsafe impl TexImage2dPixelTy for r8g8b8_Srgb {
+  const INTERNAL_FORMAT: GLint = GL_SRGB8 as _;
+  const FORMAT: GLenum = GL_RGB;
+  const TY: GLenum = GL_UNSIGNED_BYTE;
+}
+unsafe impl TexImage2dPixelTy for r8g8b8_Unorm {
+  const INTERNAL_FORMAT: GLint = GL_RGB as _;
+  const FORMAT: GLenum = GL_RGB;
+  const TY: GLenum = GL_UNSIGNED_BYTE;
+}
+unsafe impl TexImage2dPixelTy for r8g8b8a8_Srgb {
+  const INTERNAL_FORMAT: GLint = GL_SRGB8_ALPHA8 as _;
+  const FORMAT: GLenum = GL_RGBA;
+  const TY: GLenum = GL_UNSIGNED_BYTE;
+}
+unsafe impl TexImage2dPixelTy for r8g8b8a8_Unorm {
+  const INTERNAL_FORMAT: GLint = GL_RGBA32F as _;
+  const FORMAT: GLenum = GL_RGBA;
+  const TY: GLenum = GL_UNSIGNED_BYTE;
+}
+unsafe impl TexImage2dPixelTy for r32g32b32a32_Sfloat {
+  const INTERNAL_FORMAT: GLint = GL_RGBA8 as _;
+  const FORMAT: GLenum = GL_RGBA;
+  const TY: GLenum = GL_FLOAT;
 }
 
 impl EzGl {
@@ -724,4 +800,38 @@ pub enum ShaderType {
   TessEvaluationShader = GL_TESS_EVALUATION_SHADER,
   GeometryShader = GL_GEOMETRY_SHADER,
   FragmentShader = GL_FRAGMENT_SHADER,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum BlendEquationSeparate {
+  Add = GL_FUNC_ADD,
+  Subtact = GL_FUNC_SUBTRACT,
+  ReverseSubtract = GL_FUNC_REVERSE_SUBTRACT,
+  Min = GL_MIN,
+  Max = GL_MAX,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum BlendFuncSeparate {
+  Zero = GL_ZERO,
+  One = GL_ONE,
+  SrcColor = GL_SRC_COLOR,
+  OneMinusSrcColor = GL_ONE_MINUS_SRC_COLOR,
+  DstColor = GL_DST_COLOR,
+  OneMinusDstColor = GL_ONE_MINUS_DST_COLOR,
+  SrcAlpha = GL_SRC_ALPHA,
+  OneMinusSrcAlpha = GL_ONE_MINUS_SRC_ALPHA,
+  DstAlpha = GL_DST_ALPHA,
+  OneMinusDstAlpha = GL_ONE_MINUS_DST_ALPHA,
+  ConstantColor = GL_CONSTANT_COLOR,
+  OneMinusConstantColor = GL_ONE_MINUS_CONSTANT_COLOR,
+  ConstantAlpha = GL_CONSTANT_ALPHA,
+  OneMinusConstantAlpha = GL_ONE_MINUS_CONSTANT_ALPHA,
+  SrcAlphaSaturate = GL_SRC_ALPHA_SATURATE,
+  Src1Color = GL_SRC1_COLOR,
+  OneMinusSrc1Color = GL_ONE_MINUS_SRC1_COLOR,
+  Src1Alpha = GL_SRC1_ALPHA,
+  OneMinusSrc1Alpha = GL_ONE_MINUS_SRC1_ALPHA,
 }
