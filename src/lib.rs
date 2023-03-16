@@ -8,14 +8,14 @@ pub use gl_constants;
 
 use core::{
   num::NonZeroU32,
-  ops::{Deref, DerefMut},
+  ops::{Deref, DerefMut, Range},
   ptr::null,
   slice::from_raw_parts as slice_from_raw_parts,
 };
 use gl_constants::*;
 use gl_struct_loader::*;
 use gl_types::*;
-use pixel_formats::r8g8b8a8_Srgb;
+use pixel_formats::{r32g32b32a32_Sfloat, r8g8b8a8_Srgb};
 
 unsafe extern "system" fn stderr_debug_message_callback(
   source: GLenum, ty: GLenum, id: GLuint, severity: GLenum, length: GLsizei,
@@ -128,7 +128,7 @@ impl EzGl {
   ///
   /// Khronos: [glBufferData](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBufferData.xhtml)
   #[inline]
-  pub fn alloc_buffer_data(
+  pub fn buffer_data(
     &self, target: BufferTarget, data: &[u8], usage: BufferUsageHint,
   ) {
     unsafe {
@@ -261,6 +261,14 @@ impl EzGl {
     unsafe { self.Clear(mask) }
   }
   #[inline]
+  pub fn clear_color_buffer(&self) {
+    self.clear(GL_COLOR_BUFFER_BIT)
+  }
+  #[inline]
+  pub fn clear_color_and_depth_buffer(&self) {
+    self.clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+  }
+  #[inline]
   pub fn get_uniform_location(
     &self, program: &ProgramObject, name: &str,
   ) -> Option<ShaderLocation> {
@@ -294,13 +302,13 @@ impl EzGl {
   }
   #[inline]
   pub fn set_texture_border_color(
-    &self, target: TextureTarget, color: &[f32; 4],
+    &self, target: TextureTarget, color: &r32g32b32a32_Sfloat,
   ) {
     unsafe {
       self.TexParameterfv(
         target as GLenum,
         GL_TEXTURE_BORDER_COLOR,
-        color.as_ptr(),
+        color as *const r32g32b32a32_Sfloat as *const f32,
       )
     }
   }
@@ -343,7 +351,7 @@ impl EzGl {
     unsafe { self.DeleteTextures(1, &texture.0.get()) }
   }
   #[inline]
-  pub fn alloc_tex_image_2d(
+  pub fn tex_image_2d(
     &self, target: TextureTarget, level: GLint, width: usize, height: usize,
     pixels: &[r8g8b8a8_Srgb],
   ) {
@@ -383,31 +391,164 @@ impl EzGl {
     }
   }
   #[inline]
+  pub fn enable_depth_test(&self, enabled: bool) {
+    if enabled {
+      unsafe { self.Enable(GL_DEPTH_TEST) };
+    } else {
+      unsafe { self.Disable(GL_DEPTH_TEST) };
+    }
+  }
+  #[inline]
   pub fn set_pixel_store_unpack_alignment(&self, align: usize) {
     debug_assert!([1, 2, 4, 8].contains(&align));
     unsafe { self.PixelStorei(GL_UNPACK_ALIGNMENT, align as GLint) }
   }
+  #[inline]
+  pub fn create_shader_with_source(
+    &self, shader_type: ShaderType, src: &str,
+  ) -> Result<ShaderObject, Box<str>> {
+    let vertex_shader = self.create_shader(shader_type).map_err(|_| {
+      String::from("Couldn't create a new shader ID.").into_boxed_str()
+    })?;
+    self.set_shader_source(&vertex_shader, src);
+    self.compile_shader(&vertex_shader);
+    if self.get_shader_compile_success(&vertex_shader) {
+      Ok(vertex_shader)
+    } else {
+      let log = self.get_shader_info_log(&vertex_shader);
+      self.delete_shader(vertex_shader);
+      Err(log)
+    }
+  }
+  #[inline]
+  pub fn create_vertex_fragment_program(
+    &self, vertex_src: &str, fragment_src: &str,
+  ) -> Result<ProgramObject, Box<str>> {
+    let v =
+      self.create_shader_with_source(ShaderType::VertexShader, vertex_src)?;
+    let f = self
+      .create_shader_with_source(ShaderType::FragmentShader, fragment_src)?;
+    let program = self.create_program().map_err(|_| {
+      String::from("Couldn't create a new program ID.").into_boxed_str()
+    })?;
+    self.attach_shader(&program, &v);
+    self.attach_shader(&program, &f);
+    self.link_program(&program);
+    if self.get_program_link_success(&program) {
+      Ok(program)
+    } else {
+      let log = self.get_program_info_log(&program);
+      self.delete_program(program);
+      Err(log)
+    }
+  }
+  /// The maximum number of texture image units that the sampler in the
+  /// **fragment** shader can access.
+  #[inline]
+  pub fn get_max_fragment_texture_image_units(&self) -> i32 {
+    // For legacy reasons this uses `GL_MAX_TEXTURE_IMAGE_UNITS`, but all other
+    // shaders use enums called "max_{stage}_texture_image_units", so for
+    // consistency this method has a name that matches that pattern even though
+    // the enum name doesn't match.
+    let mut out = 0;
+    unsafe { self.GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &mut out) };
+    out
+  }
+  /// The total number of texture units that can be used from all active
+  /// programs.
+  #[inline]
+  pub fn get_max_combined_texture_image_units(&self) -> u32 {
+    let mut out = 0;
+    unsafe { self.GetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &mut out) };
+    out.try_into().unwrap()
+  }
+  /// Sets the active texture unit value.
+  ///
+  /// This should be from 0 to one less than
+  /// [`get_max_combined_texture_image_units`](Self::get_max_combined_texture_image_units).
+  #[inline]
+  pub fn set_active_texture_unit(&self, unit: u32) {
+    unsafe { self.ActiveTexture(GL_TEXTURE0 + unit) };
+  }
+  #[inline]
+  pub fn get_active_texture_unit(&self) -> u32 {
+    let mut out = 0;
+    unsafe { self.GetIntegerv(GL_ACTIVE_TEXTURE, &mut out) };
+    u32::try_from(out).unwrap() - GL_TEXTURE0
+  }
 }
 
 impl EzGl {
+  /// Draws using the array buffer data.
+  ///
+  /// * `mode` is the geometric primitive to assemble.
+  /// * `range` is the `low..high` index span of array data to draw.
+  ///
+  /// ## Panics
+  /// * `assert!(range.start < range.end);`
+  ///
   /// ## Safety
   /// * The attrib pointers must have been properly configured
   /// * The arguments to this function must not cause the buffer data to be read
   ///   out of bounds.
   #[inline]
-  pub unsafe fn draw_arrays(&self, mode: GLenum, first: GLint, count: GLsizei) {
-    self.DrawArrays(mode, first, count)
+  pub unsafe fn draw_arrays(&self, mode: DrawMode, range: Range<usize>) {
+    assert!(range.start < range.end);
+    let first = range.start;
+    let count = range.end - range.start;
+    self.DrawArrays(
+      mode as GLenum,
+      first.try_into().unwrap(),
+      count.try_into().unwrap(),
+    )
   }
+
+  /// Draws using the element buffer.
+  ///
+  /// * `T` is the type of data in the elements buffer.
+  /// * `mode` is the geometric primitive to assemble.
+  /// * `range` is the `low..high` index span of elements data to draw.
+  ///
+  /// ## Panics
+  /// * `assert!(range.start < range.end);`
+  ///
   /// ## Safety
-  /// * The attrib pointers must have been properly configured
-  /// * The arguments to this function must not cause the buffer data to be read
-  ///   out of bounds.
+  /// * The vertex attrib pointers must have been properly configured to match
+  ///   the vertex buffer data.
+  /// * The arguments to this function must not cause the vertex or element
+  ///   buffers to be read out of bounds, or you must have configured the
+  ///   context for robust buffer access.
   #[inline]
-  pub unsafe fn draw_elements(
-    &self, mode: GLenum, count: GLsizei, ty: GLenum, indices: usize,
+  pub unsafe fn draw_elements<T: DrawElementsType>(
+    &self, mode: DrawMode, range: Range<usize>,
   ) {
-    self.DrawElements(mode, count, ty, indices as *const c_void)
+    assert!(range.start < range.end);
+    let base = range.start;
+    let count = range.end - range.start;
+    self.DrawElements(
+      mode as GLenum,
+      count.try_into().unwrap(),
+      T::ENUM,
+      base as *const c_void,
+    )
   }
+}
+
+/// Types that can be used with a "draw elements" call.
+///
+/// ## Safety
+/// * You cannot implement this trait.
+pub unsafe trait DrawElementsType {
+  const ENUM: GLenum;
+}
+unsafe impl DrawElementsType for u8 {
+  const ENUM: GLenum = GL_UNSIGNED_BYTE;
+}
+unsafe impl DrawElementsType for u16 {
+  const ENUM: GLenum = GL_UNSIGNED_SHORT;
+}
+unsafe impl DrawElementsType for u32 {
+  const ENUM: GLenum = GL_UNSIGNED_INT;
 }
 
 impl EzGl {
@@ -523,6 +664,23 @@ pub enum TextureWrap {
   MirroredRepeat = GL_MIRRORED_REPEAT,
   Repeat = GL_REPEAT,
   MirrorClampToEdge = GL_MIRROR_CLAMP_TO_EDGE,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum DrawMode {
+  Points = GL_POINTS,
+  LineStrip = GL_LINE_STRIP,
+  LineLoop = GL_LINE_LOOP,
+  Lines = GL_LINES,
+  LineStripAdjacency = GL_LINE_STRIP_ADJACENCY,
+  LinesAdjacency = GL_LINES_ADJACENCY,
+  TriangleStrip = GL_TRIANGLE_STRIP,
+  TriangleFan = GL_TRIANGLE_FAN,
+  Triangles = GL_TRIANGLES,
+  TriangleStripAdjacency = GL_TRIANGLE_STRIP_ADJACENCY,
+  TrianglesAdjacency = GL_TRIANGLES_ADJACENCY,
+  Patches = GL_PATCHES,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

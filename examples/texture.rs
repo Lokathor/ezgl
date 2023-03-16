@@ -1,5 +1,3 @@
-use core::mem::size_of;
-
 use beryllium::{
   events::Event,
   init::InitFlags,
@@ -7,12 +5,19 @@ use beryllium::{
   Sdl,
 };
 use bytemuck::cast_slice;
+use core::mem::size_of;
 use ezgl::{
-  BufferTarget::*, BufferUsageHint::*, EzGl, MagFilter, MinFilter,
-  ShaderType::*, TextureTarget::*, TextureWrap,
+  BufferTarget::*, BufferUsageHint::*, DrawMode, EzGl, MagFilter, MinFilter,
+  TextureTarget::*, TextureWrap,
 };
-use gl_constants::*;
 use imagine::{image::Bitmap, pixel_formats::RGBA8888};
+use pixel_formats::r32g32b32a32_Sfloat;
+
+macro_rules! check {
+  ($gl:ident.$method:ident) => {
+    eprintln!(concat!(stringify!($method), ": {}"), $gl.$method());
+  };
+}
 
 const USE_GLES: bool =
   cfg!(target_arch = "aarch64") || cfg!(target_arch = "arm");
@@ -32,8 +37,8 @@ const VERTEX_SRC: &str = "
   
   void main()
   {
-      gl_Position = vec4(aPos, 1.0);
-      TexCoord = aTexCoord;
+    gl_Position = vec4(aPos, 1.0);
+    TexCoord = aTexCoord;
   }";
 
 const FRAGMENT_SRC: &str = "
@@ -45,7 +50,7 @@ const FRAGMENT_SRC: &str = "
   
   void main()
   {
-      FragColor = texture(ourTexture, TexCoord);
+    FragColor = texture(ourTexture, TexCoord);
   }";
 
 const GLIDER_BYTES: &[u8] = include_bytes!("../assets/glider-big-rainbow.png");
@@ -58,14 +63,12 @@ fn main() {
   // Initializes SDL2
   let sdl = Sdl::init(InitFlags::VIDEO);
   if USE_GLES {
-    // When on Aarch64 or ARM, assume that we're building for some sort of
-    // raspberry pi situation and use GLES-3.1 (best available on pi)
+    // In GLES mode we'll ask for 3.1, which is what Raspberry Pi 4 can do.
     sdl.set_gl_profile(GlProfile::ES).unwrap();
     sdl.set_gl_context_major_version(3).unwrap();
     sdl.set_gl_context_minor_version(1).unwrap();
   } else {
-    // For "normal" desktops we will use GL-4.1, which is the best that Mac can
-    // offer.
+    // For plain GL we will use GL-4.1, which is the best that Mac can offer.
     sdl.set_gl_profile(GlProfile::Core).unwrap();
     sdl.set_gl_context_major_version(4).unwrap();
     sdl.set_gl_context_minor_version(1).unwrap();
@@ -98,24 +101,26 @@ fn main() {
     unsafe { temp.load(|name| win.get_proc_address(name)) }
     temp
   };
-  if cfg!(debug_assertions) && win.supports_extension("GL_KHR_debug") {
-    if gl.set_stderr_debug_message_callback().is_ok() {
-      println!("Set the stderr GL debug callback.");
+  if cfg!(debug_assertions) {
+    if win.supports_extension("GL_KHR_debug") {
+      if gl.set_stderr_debug_message_callback().is_ok() {
+        eprintln!("Set the stderr GL debug callback.");
+      } else {
+        eprintln!("`GL_KHR_debug` should be supported, but couldn't enable the debug callback.");
+      }
     } else {
-      println!("`GL_KHR_debug` should be supported, but couldn't enable the debug callback.");
+      eprintln!("Running in debug mode but `GL_KHR_debug` is not available.")
     }
-  } else {
-    println!("Running in debug mode but `GL_KHR_debug` is not available.")
+    check!(gl.get_max_combined_texture_image_units);
+    check!(gl.get_active_texture_unit);
   }
-
-  let mut controllers = Vec::new();
 
   if !USE_GLES {
     gl.enable_multisample(true);
     gl.enable_framebuffer_srgb(true);
   }
   gl.set_pixel_store_unpack_alignment(1);
-  gl.set_clear_color(0.2, 0.3, 0.3, 1.0);
+  gl.set_clear_color(1.0, 0.0, 1.0, 1.0);
 
   let vao = gl.gen_vertex_array().unwrap();
   gl.bind_vertex_array(&vao);
@@ -123,7 +128,7 @@ fn main() {
   type Vertex = [f32; 5];
   #[rustfmt::skip]
   let vertices: &[Vertex] = &[
-  // positions    // texture coords
+    // positions      // texture coords
     [1.0, 1.0, 0.0,   1.0, 1.0], // top right
     [1.0, -1.0, 0.0,  1.0, 0.0], // bottom right
     [-1.0, -1.0, 0.0, 0.0, 0.0], // bottom left
@@ -134,11 +139,11 @@ fn main() {
 
   let vbo = gl.gen_buffer().unwrap();
   gl.bind_buffer(ArrayBuffer, &vbo);
-  gl.alloc_buffer_data(ArrayBuffer, cast_slice(vertices), StaticDraw);
+  gl.buffer_data(ArrayBuffer, cast_slice(vertices), StaticDraw);
 
   let ebo = gl.gen_buffer().unwrap();
   gl.bind_buffer(ElementArrayBuffer, &ebo);
-  gl.alloc_buffer_data(ElementArrayBuffer, cast_slice(indices), StaticDraw);
+  gl.buffer_data(ElementArrayBuffer, cast_slice(indices), StaticDraw);
 
   gl.enable_vertex_attrib_array(0);
   gl.vertex_attrib_f32_pointer::<[f32; 3]>(
@@ -155,42 +160,21 @@ fn main() {
 
   let shader_header =
     if USE_GLES { GLES_SHADER_HEADER } else { GL_SHADER_HEADER };
-  let vertex_shader = gl.create_shader(VertexShader).unwrap();
   let vertex_src = format!("{shader_header}\n{VERTEX_SRC}");
-  gl.set_shader_source(&vertex_shader, &vertex_src);
-  gl.compile_shader(&vertex_shader);
-  if !gl.get_shader_compile_success(&vertex_shader) {
-    let log = gl.get_shader_info_log(&vertex_shader);
-    panic!("Vertex Shader Error: {log}");
-  }
-
-  let fragment_shader = gl.create_shader(FragmentShader).unwrap();
   let fragment_src = format!("{shader_header}\n{FRAGMENT_SRC}");
-  gl.set_shader_source(&fragment_shader, &fragment_src);
-  gl.compile_shader(&fragment_shader);
-  if !gl.get_shader_compile_success(&fragment_shader) {
-    let log = gl.get_shader_info_log(&fragment_shader);
-    panic!("Vertex Shader Error: {log}");
-  }
-
-  let program = gl.create_program().unwrap();
-  gl.attach_shader(&program, &vertex_shader);
-  gl.attach_shader(&program, &fragment_shader);
-  gl.link_program(&program);
-  if !gl.get_program_link_success(&program) {
-    let log = gl.get_program_info_log(&program);
-    panic!("Program Link Error: {log}");
-  }
+  let program =
+    gl.create_vertex_fragment_program(&vertex_src, &fragment_src).unwrap();
   gl.use_program(&program);
 
+  let yellow = r32g32b32a32_Sfloat { r: 1.0, g: 1.0, b: 0.0, a: 1.0 };
   let texture = gl.gen_texture().unwrap();
   gl.bind_texture(Texture2D, &texture);
   gl.set_texture_wrap_s(Texture2D, TextureWrap::MirroredRepeat);
   gl.set_texture_wrap_t(Texture2D, TextureWrap::MirroredRepeat);
-  gl.set_texture_border_color(Texture2D, &[1.0, 1.0, 0.0, 1.0]);
+  gl.set_texture_border_color(Texture2D, &yellow);
   gl.set_texture_min_filter(Texture2D, MinFilter::LinearMipmapLinear);
   gl.set_texture_mag_filter(Texture2D, MagFilter::Linear);
-  gl.alloc_tex_image_2d(
+  gl.tex_image_2d(
     Texture2D,
     0,
     glider.width.try_into().unwrap(),
@@ -205,32 +189,17 @@ fn main() {
   'the_loop: loop {
     // Process events from this frame.
     #[allow(clippy::never_loop)]
+    #[allow(clippy::single_match)]
     while let Some((event, _timestamp)) = sdl.poll_events() {
       match event {
         Event::Quit => break 'the_loop,
-        Event::ControllerAdded { index } => {
-          match sdl.open_game_controller(index) {
-            Ok(controller) => {
-              println!(
-                "(beryllium) Opened `{name}` (type: {ty:?})",
-                name = controller.get_name(),
-                ty = controller.get_type()
-              );
-              controllers.push(controller);
-            }
-            Err(msg) => println!("Couldn't open {index}: {msg:?}"),
-          }
-        }
-        Event::ControllerButton { ctrl_id, button, pressed } => {
-          println!("{ctrl_id}: {button:?}={pressed}");
-        }
         _ => (),
       }
     }
 
-    gl.clear(GL_COLOR_BUFFER_BIT);
-    //unsafe { gl.draw_arrays(GL_TRIANGLES, 0, 3) };
-    unsafe { gl.draw_elements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0) };
+    gl.clear_color_and_depth_buffer();
+    //unsafe { gl.draw_arrays(DrawMode::Triangles, 0..3) };
+    unsafe { gl.draw_elements::<u32>(DrawMode::Triangles, 0..6) };
 
     win.swap_window();
   }
