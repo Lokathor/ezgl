@@ -96,6 +96,10 @@ impl EzGl {
     }
   }
   #[inline]
+  pub fn set_viewport(&self, x: i32, y: i32, width: i32, height: i32) {
+    unsafe { self.Viewport(x, y, width, height) }
+  }
+  #[inline]
   pub fn gen_vertex_array(&self) -> Result<VertexArrayObject, ()> {
     let mut obj = 0;
     unsafe { self.GenVertexArrays(1, &mut obj) };
